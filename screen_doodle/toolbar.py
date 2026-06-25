@@ -184,6 +184,7 @@ class ToolBarWindow(QWidget):
     tool_settings_changed = Signal(ToolType, QColor, float)
 
     TOOL_BUTTON_DATA: list[tuple[str, ToolType]] = [
+        ("🖱️", ToolType.MOUSE),
         ("✏️", ToolType.PEN),
         ("\U0001f58a️", ToolType.PEN2),   # 🖊️
         ("✒️", ToolType.PEN3),
@@ -337,12 +338,15 @@ class ToolBarWindow(QWidget):
             btn = QToolButton()
             btn.setText(label)
             btn.setCheckable(True)
-            btn.setToolTip(tool.name.capitalize())
+            if tool == ToolType.MOUSE:
+                btn.setToolTip("Pointer — interact with desktop")
+            else:
+                btn.setToolTip(tool.name.capitalize())
             self._tool_group.addButton(btn, tool.value)
             row.addWidget(btn)
 
-            # Inline color swatch + width label for all non-eraser tools
-            if tool != ToolType.ERASER:
+            # Inline color swatch + width label for pen & highlighter tools only
+            if tool not in (ToolType.ERASER, ToolType.MOUSE):
                 color, width_val = self._tool_settings.get(tool, (QColor(0, 0, 0), 3.0))
 
                 swatch = QPushButton()

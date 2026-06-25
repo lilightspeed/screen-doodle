@@ -47,12 +47,16 @@ if sys.platform == "win32":
                         return False, 0
                     # HTCLIENT = 1       → the window receives the mouse event
                     # HTTRANSPARENT = -1 → the event passes through
-                    return True, HTCLIENT if self._overlay._drawing_mode else HTTRANSPARENT
+                    # Passthrough mode overrides drawing mode so events reach
+                    # the desktop even while the overlay stays visible.
+                    if self._overlay._drawing_mode and not self._overlay._passthrough_mode:
+                        return True, HTCLIENT
+                    return True, HTTRANSPARENT
 
                 if msg.message == WM_SETCURSOR:
                     if int(msg.hwnd) != int(self._overlay.winId()):
                         return False, 0
-                    if self._overlay._drawing_mode:
+                    if self._overlay._drawing_mode and not self._overlay._passthrough_mode:
                         # Force crosshair cursor so it never becomes I-beam
                         ctypes.windll.user32.SetCursor(
                             ctypes.windll.user32.LoadCursorW(None, 32515)  # IDC_CROSS
@@ -74,6 +78,7 @@ class OverlayWindow(QWidget):
         super().__init__(parent)
         self._screen = screen
         self._drawing_mode = False
+        self._passthrough_mode = False
 
         self.setWindowFlags(
             Qt.FramelessWindowHint
@@ -123,11 +128,23 @@ class OverlayWindow(QWidget):
     def enter_drawing_mode(self) -> None:
         """Show the overlay and capture mouse events."""
         self._drawing_mode = True
-        self._set_ws_ex_transparent(False)  # remove WS_EX_TRANSPARENT
-        self.canvas.setCursor(Qt.CrossCursor)
+        self._set_ws_ex_transparent(False)
+        # Cursor is managed by DrawingCanvas.set_tool() — don't override it
+        # here so the MOUSE tool can keep the arrow cursor.
         self.show()
         self.raise_()
         self.activateWindow()
+
+    def set_passthrough(self, enabled: bool) -> None:
+        """Toggle mouse-event passthrough without hiding the overlay.
+
+        When enabled, mouse events pass through to the desktop while the
+        overlay stays visible — useful for the MOUSE tool.  The native
+        event filter reads ``_passthrough_mode`` to decide WM_NCHITTEST
+        and WM_SETCURSOR responses.
+        """
+        self._passthrough_mode = enabled
+        self._set_ws_ex_transparent(enabled)
 
     def exit_drawing_mode(self) -> None:
         """Hide the overlay and release mouse events."""

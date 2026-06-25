@@ -130,6 +130,9 @@ class ScreenDoodleApp(QObject):
 
         self.toolbar.hide_requested.connect(self.toggle_drawing_mode)
 
+        # Passthrough — when MOUSE tool is active, let events reach the desktop
+        self.toolbar.tool_changed.connect(self._on_tool_changed_passthrough)
+
         # Settings persistence — per-tool settings + tool + eraser
         self.toolbar.tool_settings_changed.connect(self._on_tool_settings_changed)
         self.toolbar.eraser_width_changed.connect(self._on_eraser_width_changed)
@@ -190,6 +193,10 @@ class ScreenDoodleApp(QObject):
         self.toolbar.show()
         self.toolbar.raise_()
 
+        # Sync passthrough state — if MOUSE tool is selected, overlays
+        # should let mouse events pass through to the desktop.
+        self._update_passthrough()
+
         self._register_mode_hotkeys()
 
     def _exit_drawing_mode(self) -> None:
@@ -205,6 +212,19 @@ class ScreenDoodleApp(QObject):
 
     def _on_exit_requested(self) -> None:
         self._exit_drawing_mode()
+
+    # ------------------------------------------------------------------
+    # Mouse passthrough — interact with desktop without hiding overlays
+    # ------------------------------------------------------------------
+
+    def _on_tool_changed_passthrough(self, tool: ToolType) -> None:
+        self._update_passthrough()
+
+    def _update_passthrough(self) -> None:
+        """Toggle mouse passthrough on all overlays based on current tool."""
+        passthrough = (self.toolbar._current_tool == ToolType.MOUSE)
+        for overlay in self.overlays:
+            overlay.set_passthrough(passthrough)
 
     # ------------------------------------------------------------------
     # Toolbar action handlers

@@ -8,6 +8,7 @@ from PySide6.QtGui import QColor
 
 
 class ToolType(Enum):
+    MOUSE = auto()
     PEN = auto()
     HIGHLIGHTER = auto()
     ERASER = auto()

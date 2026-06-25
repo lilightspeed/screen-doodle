@@ -52,6 +52,10 @@ class DrawingCanvas(QWidget):
 
     def set_tool(self, tool: ToolType) -> None:
         self.current_tool = tool
+        if tool == ToolType.MOUSE:
+            self.setCursor(Qt.ArrowCursor)
+        else:
+            self.setCursor(Qt.CrossCursor)
 
     def set_color(self, color: QColor) -> None:
         self.current_color = color
