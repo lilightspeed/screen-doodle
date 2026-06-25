@@ -160,8 +160,8 @@ class ToolBarWindow(QWidget):
     """Floating, draggable, semi-transparent toolbar.
 
     Each drawing tool (Pen, Highlighter) has its own colour and width
-    settings, adjustable via a popup opened by the small arrow button
-    next to the tool icon.
+    settings, shown inline as a color swatch and width label next to
+    each tool button. Click either to open the settings popup.
     """
 
     # --- signals ---
@@ -191,6 +191,9 @@ class ToolBarWindow(QWidget):
         self._pen_width: float = 3.0
         self._highlighter_color: QColor = QColor(255, 238, 0)
         self._highlighter_width: float = 12.0
+        # Swatch and width label references for display update
+        self._tool_swatches: dict[ToolType, QPushButton] = {}
+        self._tool_width_labels: dict[ToolType, QPushButton] = {}
 
         self._setup_window()
         self._build_ui()
@@ -214,7 +217,7 @@ class ToolBarWindow(QWidget):
         screen = QApplication.primaryScreen()
         if screen:
             sg = screen.availableGeometry()
-            tw, th = 440, 44
+            tw, th = 520, 66
             self.setGeometry(sg.center().x() - tw // 2, sg.top() + 30, tw, th)
 
         self.setObjectName("ToolBarWindow")
@@ -230,11 +233,11 @@ class ToolBarWindow(QWidget):
                 min-height: 28px;
             }
             QToolButton:hover {
-                background: rgba(0,0,0,0.06);
+                background: #C8E0F8;
             }
             QToolButton:checked {
-                background: rgba(70,130,255,0.20);
-                border-color: rgba(70,130,255,0.45);
+                background: rgba(70,130,255,0.25);
+                border-color: rgba(70,130,255,0.55);
             }
             QSlider::groove:horizontal {
                 background: rgba(0,0,0,0.12);
@@ -260,8 +263,9 @@ class ToolBarWindow(QWidget):
                 font-size: 12px;
             }
             QPushButton:hover {
-                background: rgba(0,0,0,0.10);
-                color: #222;
+                background: #C8E0F8;
+                border-color: #7AA8F0;
+                color: #111;
             }
             QLabel {
                 color: #888;
@@ -289,21 +293,26 @@ class ToolBarWindow(QWidget):
         painter.drawRoundedRect(self.rect().adjusted(1, 1, -1, -1), 8, 8)
 
     def _build_ui(self) -> None:
-        main_layout = QHBoxLayout(self)
-        main_layout.setContentsMargins(8, 4, 8, 4)
+        # Outer vertical layout: stretch at top pushes buttons to bottom,
+        # leaving empty drag space above.
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.addStretch()
+
+        main_layout = QHBoxLayout()
+        main_layout.setContentsMargins(8, 0, 8, 6)
         main_layout.setSpacing(4)
 
-        # -- Tool buttons with arrow popups --
+        # -- Tool buttons with inline color swatch + width label --
         self._tool_group = QButtonGroup(self)
         self._tool_group.setExclusive(True)
-        self._tool_arrows: dict[ToolType, QPushButton] = {}
 
         for label, tool in self.TOOL_BUTTON_DATA:
             container = QWidget()
             container.setStyleSheet("QWidget { background: transparent; }")
             row = QHBoxLayout(container)
             row.setContentsMargins(0, 0, 0, 0)
-            row.setSpacing(0)
+            row.setSpacing(2)
 
             btn = QToolButton()
             btn.setText(label)
@@ -312,34 +321,60 @@ class ToolBarWindow(QWidget):
             self._tool_group.addButton(btn, tool.value)
             row.addWidget(btn)
 
-            # Arrow button opens per-tool settings popup
+            # Inline color swatch + width label for PEN and HIGHLIGHTER
             if tool in (ToolType.PEN, ToolType.HIGHLIGHTER):
-                arrow = QPushButton("▾")
-                arrow.setFixedSize(14, 28)
-                arrow.setCursor(Qt.PointingHandCursor)
-                arrow.setToolTip(f"{tool.name.capitalize()} settings")
-                arrow.setStyleSheet("""
+                color = self._pen_color if tool == ToolType.PEN else self._highlighter_color
+                width_val = self._pen_width if tool == ToolType.PEN else self._highlighter_width
+
+                swatch = QPushButton()
+                swatch.setFixedSize(14, 14)
+                swatch.setCursor(Qt.PointingHandCursor)
+                swatch.setToolTip(f"Change {tool.name.lower()} color")
+                r, g, b = color.red(), color.green(), color.blue()
+                border = "1px solid #888" if color.lightness() > 128 else "1px solid #555"
+                swatch.setStyleSheet(f"""
+                    QPushButton {{
+                        background-color: rgb({r},{g},{b});
+                        border: {border};
+                        border-radius: 7px;
+                        padding: 0;
+                    }}
+                    QPushButton:hover {{
+                        border: 2px solid #333;
+                    }}
+                """)
+                self._tool_swatches[tool] = swatch
+
+                wlabel = QPushButton(f"{int(round(width_val))}px")
+                wlabel.setFixedWidth(28)
+                wlabel.setCursor(Qt.PointingHandCursor)
+                wlabel.setToolTip(f"Change {tool.name.lower()} width")
+                wlabel.setStyleSheet("""
                     QPushButton {
-                        color: #999;
+                        color: #666;
                         background: transparent;
                         border: none;
-                        border-radius: 0;
-                        padding: 0 1px;
-                        font-size: 8px;
+                        font-size: 11px;
+                        padding: 0;
                         min-width: 0;
                         min-height: 0;
                     }
                     QPushButton:hover {
-                        color: #333;
-                        background: rgba(0,0,0,0.08);
+                        color: #1565C0;
+                        background: #C8E0F8;
                     }
                 """)
-                self._tool_arrows[tool] = arrow
+                self._tool_width_labels[tool] = wlabel
+
                 if tool == ToolType.PEN:
-                    arrow.clicked.connect(self._show_pen_settings)
+                    swatch.clicked.connect(self._show_pen_settings)
+                    wlabel.clicked.connect(self._show_pen_settings)
                 else:
-                    arrow.clicked.connect(self._show_highlighter_settings)
-                row.addWidget(arrow)
+                    swatch.clicked.connect(self._show_highlighter_settings)
+                    wlabel.clicked.connect(self._show_highlighter_settings)
+
+                row.addWidget(swatch)
+                row.addWidget(wlabel)
 
             main_layout.addWidget(container)
 
@@ -382,10 +417,12 @@ class ToolBarWindow(QWidget):
         self._hide_btn.setToolTip("Hide (Esc)")
         self._hide_btn.setStyleSheet(
             "QPushButton { color: #666; font-size: 14px; "
-            "background: transparent; border: none; }"
-            "QPushButton:hover { color: #222; }"
+            "background: transparent; border: none; border-radius: 4px; }"
+            "QPushButton:hover { color: #1565C0; background: #C8E0F8; }"
         )
         main_layout.addWidget(self._hide_btn)
+
+        outer.addLayout(main_layout)
 
         # Default tool: PEN selected
         pen_btn = self._tool_group.button(ToolType.PEN.value)
@@ -468,15 +505,16 @@ class ToolBarWindow(QWidget):
                 lambda w: self._on_highlighter_settings_changed(self._highlighter_color, w)
             )
 
-        arrow = self._tool_arrows.get(tool)
-        if arrow:
-            pos = arrow.mapToGlobal(arrow.rect().bottomLeft())
+        swatch = self._tool_swatches.get(tool)
+        if swatch:
+            pos = swatch.mapToGlobal(swatch.rect().bottomLeft())
             popup.move(pos)
         popup.show()
 
     def _on_pen_settings_changed(self, color: QColor, width: float) -> None:
         self._pen_color = color
         self._pen_width = width
+        self._update_swatch_display(ToolType.PEN, color, width)
         self.pen_settings_changed.emit(color, width)
         if self._current_tool == ToolType.PEN:
             self.color_changed.emit(color)
@@ -485,10 +523,32 @@ class ToolBarWindow(QWidget):
     def _on_highlighter_settings_changed(self, color: QColor, width: float) -> None:
         self._highlighter_color = color
         self._highlighter_width = width
+        self._update_swatch_display(ToolType.HIGHLIGHTER, color, width)
         self.highlighter_settings_changed.emit(color, width)
         if self._current_tool == ToolType.HIGHLIGHTER:
             self.color_changed.emit(color)
             self.width_changed.emit(width)
+
+    def _update_swatch_display(self, tool: ToolType, color: QColor, width: float) -> None:
+        """Update the inline color swatch and width label for the given tool."""
+        swatch = self._tool_swatches.get(tool)
+        if swatch:
+            r, g, b = color.red(), color.green(), color.blue()
+            border = "1px solid #888" if color.lightness() > 128 else "1px solid #555"
+            swatch.setStyleSheet(f"""
+                QPushButton {{
+                    background-color: rgb({r},{g},{b});
+                    border: {border};
+                    border-radius: 7px;
+                    padding: 0;
+                }}
+                QPushButton:hover {{
+                    border: 2px solid #333;
+                }}
+            """)
+        wlabel = self._tool_width_labels.get(tool)
+        if wlabel:
+            wlabel.setText(f"{int(round(width))}px")
 
     def _on_eraser_width_changed(self, value: int) -> None:
         self._eraser_label.setText(str(value))
@@ -501,10 +561,12 @@ class ToolBarWindow(QWidget):
     def set_pen_settings(self, color: QColor, width: float) -> None:
         self._pen_color = color
         self._pen_width = width
+        self._update_swatch_display(ToolType.PEN, color, width)
 
     def set_highlighter_settings(self, color: QColor, width: float) -> None:
         self._highlighter_color = color
         self._highlighter_width = width
+        self._update_swatch_display(ToolType.HIGHLIGHTER, color, width)
 
     def set_eraser_width(self, width: float) -> None:
         self._eraser_slider.setValue(int(round(width)))
