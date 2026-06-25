@@ -42,6 +42,10 @@ class DrawingCanvas(QWidget):
         # Rebuild cache when strokes change
         self.stroke_manager.data_changed.connect(self._invalidate_cache)
 
+        # Force a crosshair cursor so the cursor never switches to I-beam
+        # when hovering over text in the underlying window.
+        self.setCursor(Qt.CrossCursor)
+
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
@@ -71,6 +75,13 @@ class DrawingCanvas(QWidget):
         self._invalidate_cache()
         self.update()
 
+    def release_input(self) -> None:
+        """Release any active mouse grab.
+
+        Called from the overlay when the user exits drawing mode — ensures
+        we don't leave the mouse captured if Escape is pressed mid-drag."""
+        self.releaseMouse()
+
     def undo(self) -> None:
         self.stroke_manager.undo()
         self.update()
@@ -98,6 +109,7 @@ class DrawingCanvas(QWidget):
 
     def mousePressEvent(self, event: QMouseEvent) -> None:
         if event.button() == Qt.LeftButton:
+            self.grabMouse()  # capture all mouse events during drag
             pos = event.position()
             width = self._eraser_width if self.current_tool == ToolType.ERASER else self.current_width
             self.stroke_manager.start_stroke(
@@ -125,6 +137,7 @@ class DrawingCanvas(QWidget):
 
     def mouseReleaseEvent(self, event: QMouseEvent) -> None:
         if event.button() == Qt.LeftButton:
+            self.releaseMouse()  # release mouse capture
             self.stroke_manager.end_stroke()
             self._cache_dirty = True
             self.update()
@@ -139,31 +152,45 @@ class DrawingCanvas(QWidget):
         painter.setRenderHint(QPainter.Antialiasing)
         painter.setRenderHint(QPainter.SmoothPixmapTransform)
 
-        # Background (screenshot)
+        # ── Layer 1: Background ──────────────────────────────────────
+        # Always ensure every pixel has alpha >= 3 so Windows layered-window
+        # per-pixel hit-testing delivers mouse events.  This layer is drawn
+        # FIRST and is never touched by the eraser.
+
         if self._background is not None:
             scaled = self._background.scaled(
                 self.size(),
                 Qt.KeepAspectRatioByExpanding,
                 Qt.SmoothTransformation,
             )
+            # Composite screenshot on top of the alpha=3 fill so that
+            # erasing strokes reveals the screenshot, not desktop.
+            painter.fillRect(self.rect(), QColor(0, 0, 0, 3))
             painter.drawPixmap(0, 0, scaled)
         else:
-            # Use nearly transparent fill (alpha=1, not alpha=0) so that the
-            # Windows layered-window per-pixel hit-testing delivers mouse
-            # events to the overlay.  A fully transparent (alpha=0) fill
-            # causes the window manager to reject all clicks on the overlay.
-            painter.fillRect(self.rect(), QColor(0, 0, 0, 1))
+            painter.fillRect(self.rect(), QColor(0, 0, 0, 3))
 
-        # Finalised strokes (re-rendered each time so eraser works correctly)
+        # ── Layer 2: Strokes ─────────────────────────────────────────
+        # Render all strokes onto a temporary pixmap filled with
+        # Qt.transparent, then composite it over the background.  This way
+        # the eraser (CompositionMode_Clear) only erases the stroke layer,
+        # never the background — preserving alpha>0 for hit-testing.
+        temp = QPixmap(self.size())
+        temp.fill(Qt.transparent)
+        temp_painter = QPainter(temp)
+        temp_painter.setRenderHint(QPainter.Antialiasing)
+
         for stroke in self.stroke_manager.get_strokes():
-            render_stroke(painter, stroke, is_preview=False)
+            render_stroke(temp_painter, stroke, is_preview=False)
 
-        # Preview (in-progress stroke)
         preview = self.stroke_manager.preview_stroke()
         if preview is not None:
-            render_stroke(painter, preview, is_preview=True)
+            render_stroke(temp_painter, preview, is_preview=True)
 
-        # Eraser cursor preview — dashed circle showing the eraser size
+        temp_painter.end()
+        painter.drawPixmap(0, 0, temp)
+
+        # ── Eraser cursor preview ────────────────────────────────────
         if self.current_tool == ToolType.ERASER and self._mouse_pos is not None:
             pen = QPen(QColor(128, 128, 128, 180), 1.5, Qt.DashLine)
             painter.setPen(pen)
