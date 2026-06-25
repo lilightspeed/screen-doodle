@@ -31,9 +31,11 @@ class ScreenDoodleApp(QObject):
 
     DEFAULTS = {
         "hotkey": "ctrl+shift+d",
-        "default_color": "#FF0000",
-        "default_width": 3.0,
         "default_tool": ToolType.PEN.value,
+        "pen_color": "#FF0000",
+        "pen_width": 3.0,
+        "highlighter_color": "#FFEE00",
+        "highlighter_width": 12.0,
         "eraser_width": 20.0,
         "opacity": 1.0,
         "toolbar_x": None,
@@ -117,7 +119,6 @@ class ScreenDoodleApp(QObject):
             self.toolbar.tool_changed.connect(canvas.set_tool)
             self.toolbar.color_changed.connect(canvas.set_color)
             self.toolbar.width_changed.connect(canvas.set_width)
-            self.toolbar.opacity_changed.connect(canvas.set_opacity)
             self.toolbar.undo_requested.connect(canvas.undo)
             self.toolbar.redo_requested.connect(canvas.redo)
             self.toolbar.clear_requested.connect(canvas.clear_all)
@@ -125,11 +126,11 @@ class ScreenDoodleApp(QObject):
 
         self.toolbar.hide_requested.connect(self.toggle_drawing_mode)
 
-        # Settings persistence — persist every change
-        self.toolbar.width_changed.connect(self._on_width_changed)
+        # Settings persistence — per-tool settings + tool + eraser
+        self.toolbar.pen_settings_changed.connect(self._on_pen_settings_changed)
+        self.toolbar.highlighter_settings_changed.connect(self._on_highlighter_settings_changed)
         self.toolbar.eraser_width_changed.connect(self._on_eraser_width_changed)
         self.toolbar.tool_changed.connect(self._on_tool_changed)
-        self.toolbar.color_changed.connect(self._on_color_changed)
 
     # ------------------------------------------------------------------
     # Hotkey management
@@ -233,8 +234,14 @@ class ScreenDoodleApp(QObject):
     # Settings persistence
     # ------------------------------------------------------------------
 
-    def _on_width_changed(self, width: float) -> None:
-        self._settings["default_width"] = width
+    def _on_pen_settings_changed(self, color: QColor, width: float) -> None:
+        self._settings["pen_color"] = color.name()
+        self._settings["pen_width"] = width
+        self._save_settings()
+
+    def _on_highlighter_settings_changed(self, color: QColor, width: float) -> None:
+        self._settings["highlighter_color"] = color.name()
+        self._settings["highlighter_width"] = width
         self._save_settings()
 
     def _on_eraser_width_changed(self, width: float) -> None:
@@ -243,10 +250,6 @@ class ScreenDoodleApp(QObject):
 
     def _on_tool_changed(self, tool: ToolType) -> None:
         self._settings["default_tool"] = tool.value
-        self._save_settings()
-
-    def _on_color_changed(self, color: QColor) -> None:
-        self._settings["default_color"] = color.name()
         self._save_settings()
 
     # ------------------------------------------------------------------
@@ -310,20 +313,22 @@ class ScreenDoodleApp(QObject):
             print(f"[ScreenDoodle] Failed to save settings: {exc}")
 
     def _apply_settings(self) -> None:
-        color = QColor(self._settings.get("default_color", "#FF0000"))
-        width = self._settings.get("default_width", 3.0)
+        pen_color = QColor(self._settings.get("pen_color", "#FF0000"))
+        pen_width = self._settings.get("pen_width", 3.0)
+        hl_color = QColor(self._settings.get("highlighter_color", "#FFEE00"))
+        hl_width = self._settings.get("highlighter_width", 12.0)
         tool_val = self._settings.get("default_tool", ToolType.PEN.value)
         eraser_width = self._settings.get("eraser_width", 20.0)
 
-        self.toolbar.set_color(color)
-        self.toolbar.set_width(width)
+        self.toolbar.set_pen_settings(pen_color, pen_width)
+        self.toolbar.set_highlighter_settings(hl_color, hl_width)
         self.toolbar.set_eraser_width(eraser_width)
 
         try:
             tool = ToolType(tool_val)
         except ValueError:
             tool = ToolType.PEN
-        self.toolbar._on_tool_clicked(tool.value)
+        self.toolbar.activate_tool(tool)
 
         tx = self._settings.get("toolbar_x")
         ty = self._settings.get("toolbar_y")
