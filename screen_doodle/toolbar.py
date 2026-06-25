@@ -5,6 +5,7 @@ from PySide6.QtGui import (
     QColor,
     QMouseEvent,
     QPainter,
+    QPen,
     QPixmap,
 )
 from PySide6.QtWidgets import (
@@ -37,7 +38,7 @@ class ColorSwatch(QPushButton):
 
     def _update_style(self) -> None:
         r, g, b = self._color.red(), self._color.green(), self._color.blue()
-        border = "1px solid #888" if self._color.lightness() > 128 else "1px solid #555"
+        border = "1px solid #aaa" if self._color.lightness() > 128 else "1px solid #666"
         self.setStyleSheet(
             f"background-color: rgb({r},{g},{b}); border: {border}; border-radius: 3px;"
         )
@@ -72,7 +73,7 @@ class ColorPalettePopup(QWidget):
         # Swatch grid (4 columns)
         grid = QFrame(self)
         grid.setStyleSheet(
-            "QFrame { background: rgba(40,40,50,230); border-radius: 6px; padding: 6px; }"
+            "QFrame { background: rgba(240,240,245,240); border-radius: 6px; padding: 6px; }"
         )
         grid_layout = QHBoxLayout(grid)
         grid_layout.setSpacing(4)
@@ -99,11 +100,11 @@ class ColorPalettePopup(QWidget):
         custom_btn.setStyleSheet(
             """
             QPushButton {
-                background: rgba(60,60,70,230); color: #ddd;
-                border: 1px solid #555; border-radius: 4px;
+                background: rgba(240,240,245,240); color: #444;
+                border: 1px solid #ccc; border-radius: 4px;
                 padding: 4px 8px; font-size: 12px;
             }
-            QPushButton:hover { background: rgba(80,80,90,230); }
+            QPushButton:hover { background: rgba(220,220,230,240); color: #222; }
             """
         )
         custom_btn.clicked.connect(self._on_custom)
@@ -178,14 +179,10 @@ class ToolBarWindow(QWidget):
             tw, th = 620, 48
             self.setGeometry(sg.center().x() - tw // 2, sg.top() + 30, tw, th)
 
+        self.setObjectName("ToolBarWindow")
         self.setStyleSheet("""
-            QToolBar {
-                background: rgba(30,30,35,200);
-                border-radius: 8px;
-                padding: 4px;
-            }
             QToolButton {
-                color: #eee;
+                color: #333;
                 background: transparent;
                 border: 1px solid transparent;
                 border-radius: 4px;
@@ -195,44 +192,69 @@ class ToolBarWindow(QWidget):
                 min-height: 28px;
             }
             QToolButton:hover {
-                background: rgba(255,255,255,0.12);
+                background: rgba(0,0,0,0.06);
             }
             QToolButton:checked {
-                background: rgba(70,130,255,0.35);
-                border-color: rgba(70,130,255,0.7);
+                background: rgba(70,130,255,0.20);
+                border-color: rgba(70,130,255,0.45);
             }
             QSlider::groove:horizontal {
-                background: rgba(255,255,255,0.2);
+                background: rgba(0,0,0,0.12);
                 height: 4px;
                 border-radius: 2px;
             }
             QSlider::handle:horizontal {
-                background: #ddd;
+                background: #888;
                 width: 12px;
                 height: 12px;
                 margin: -4px 0;
                 border-radius: 6px;
             }
             QSlider::handle:horizontal:hover {
-                background: #fff;
+                background: #555;
             }
             QPushButton {
-                color: #ccc;
-                background: rgba(255,255,255,0.08);
-                border: 1px solid #555;
+                color: #555;
+                background: rgba(0,0,0,0.04);
+                border: 1px solid #bbb;
                 border-radius: 4px;
                 padding: 3px 8px;
                 font-size: 12px;
             }
             QPushButton:hover {
-                background: rgba(255,255,255,0.16);
-                color: #fff;
+                background: rgba(0,0,0,0.10);
+                color: #222;
+            }
+            QLabel {
+                color: #888;
+                font-size: 11px;
             }
         """)
 
     # ------------------------------------------------------------------
     # UI construction
     # ------------------------------------------------------------------
+
+    def paintEvent(self, event) -> None:  # noqa: N802
+        """Paint the translucent background and ensure hit-test coverage.
+
+        Without this override the toolbar (a ``WA_TranslucentBackground``
+        window) would have alpha=0 in the gaps between child widgets,
+        causing Windows to skip those pixels during hit-testing — making
+        buttons feel "dead" at their edges.
+        """
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+
+        # Full-area fill with near-zero alpha ensures *every* pixel in the
+        # toolbar window has alpha > 0, so Windows layered-window hit-testing
+        # delivers mouse events everywhere within the toolbar boundary.
+        painter.fillRect(self.rect(), QColor(255, 255, 255, 1))
+
+        # The visible semi-transparent background with rounded corners.
+        painter.setBrush(QColor(235, 235, 240, 240))
+        painter.setPen(QPen(QColor(200, 200, 210, 200), 1))
+        painter.drawRoundedRect(self.rect().adjusted(1, 1, -1, -1), 8, 8)
 
     def _build_ui(self) -> None:
         main_layout = QHBoxLayout(self)
@@ -321,9 +343,9 @@ class ToolBarWindow(QWidget):
         self._quit_btn.setFixedSize(22, 22)
         self._quit_btn.setToolTip("Quit")
         self._quit_btn.setStyleSheet(
-            "QPushButton { color: #f66; font-size: 14px; "
+            "QPushButton { color: #d44; font-size: 14px; "
             "background: transparent; border: none; }"
-            "QPushButton:hover { color: #f00; }"
+            "QPushButton:hover { color: #b00; }"
         )
         main_layout.addWidget(self._quit_btn)
 
@@ -336,7 +358,7 @@ class ToolBarWindow(QWidget):
         """Vertical separator line."""
         f = QFrame()
         f.setFrameShape(QFrame.VLine)
-        f.setStyleSheet("color: rgba(255,255,255,0.2);")
+        f.setStyleSheet("color: rgba(0,0,0,0.12);")
         f.setFixedWidth(1)
         return f
 
@@ -401,6 +423,10 @@ class ToolBarWindow(QWidget):
     def set_width(self, width: float) -> None:
         self._width_slider.setValue(int(round(width)))
         self._width_label.setText(str(int(round(width))))
+
+    def set_eraser_width(self, width: float) -> None:
+        self._eraser_slider.setValue(int(round(width)))
+        self._eraser_label.setText(str(int(round(width))))
 
     # ------------------------------------------------------------------
     # Drag support

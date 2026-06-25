@@ -35,6 +35,7 @@ class ScreenDoodleApp(QObject):
         "default_color": "#FF0000",
         "default_width": 3.0,
         "default_tool": ToolType.PEN.value,
+        "eraser_width": 20.0,
         "opacity": 1.0,
         "toolbar_x": None,
         "toolbar_y": None,
@@ -125,6 +126,12 @@ class ScreenDoodleApp(QObject):
 
         self.toolbar.screenshot_requested.connect(self._on_screenshot)
         self.toolbar.quit_requested.connect(self._on_quit)
+
+        # Settings persistence — persist every change
+        self.toolbar.width_changed.connect(self._on_width_changed)
+        self.toolbar.eraser_width_changed.connect(self._on_eraser_width_changed)
+        self.toolbar.tool_changed.connect(self._on_tool_changed)
+        self.toolbar.color_changed.connect(self._on_color_changed)
 
     # ------------------------------------------------------------------
     # Hotkey management
@@ -243,6 +250,26 @@ class ScreenDoodleApp(QObject):
         self._app.quit()
 
     # ------------------------------------------------------------------
+    # Settings persistence
+    # ------------------------------------------------------------------
+
+    def _on_width_changed(self, width: float) -> None:
+        self._settings["default_width"] = width
+        self._save_settings()
+
+    def _on_eraser_width_changed(self, width: float) -> None:
+        self._settings["eraser_width"] = width
+        self._save_settings()
+
+    def _on_tool_changed(self, tool: ToolType) -> None:
+        self._settings["default_tool"] = tool.value
+        self._save_settings()
+
+    def _on_color_changed(self, color: QColor) -> None:
+        self._settings["default_color"] = color.name()
+        self._save_settings()
+
+    # ------------------------------------------------------------------
     # System tray
     # ------------------------------------------------------------------
 
@@ -306,9 +333,11 @@ class ScreenDoodleApp(QObject):
         color = QColor(self._settings.get("default_color", "#FF0000"))
         width = self._settings.get("default_width", 3.0)
         tool_val = self._settings.get("default_tool", ToolType.PEN.value)
+        eraser_width = self._settings.get("eraser_width", 20.0)
 
         self.toolbar.set_color(color)
         self.toolbar.set_width(width)
+        self.toolbar.set_eraser_width(eraser_width)
 
         try:
             tool = ToolType(tool_val)
