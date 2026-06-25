@@ -28,7 +28,7 @@ def render_stroke(
 
     if tool == ToolType.ERASER:
         _draw_eraser(painter, stroke, is_preview)
-    elif tool in (ToolType.HIGHLIGHTER, ToolType.PEN):
+    else:
         _draw_freehand(painter, stroke, is_preview)
 
 

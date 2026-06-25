@@ -69,8 +69,10 @@ class ToolSettingsPopup(QWidget):
     ):
         super().__init__(parent)
         self.setWindowFlags(Qt.Popup | Qt.FramelessWindowHint)
-        self.setAttribute(Qt.WA_TranslucentBackground)
         self.setAttribute(Qt.WA_ShowWithoutActivating)
+
+        self._bg_color = QColor(245, 245, 248)
+        self._border_color = QColor(200, 200, 210)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(8, 8, 8, 8)
@@ -83,9 +85,7 @@ class ToolSettingsPopup(QWidget):
 
         # Colour grid
         grid = QFrame(self)
-        grid.setStyleSheet(
-            "QFrame { background: rgba(240,240,245,240); border-radius: 6px; padding: 6px; }"
-        )
+        grid.setStyleSheet("QFrame { background: #E4E4EC; border-radius: 6px; padding: 6px; }")
         grid_layout = QHBoxLayout(grid)
         grid_layout.setSpacing(4)
         grid_layout.setContentsMargins(4, 4, 4, 4)
@@ -108,11 +108,11 @@ class ToolSettingsPopup(QWidget):
         custom_btn = QPushButton("Custom…")
         custom_btn.setStyleSheet("""
             QPushButton {
-                background: rgba(240,240,245,240); color: #444;
+                background: #E4E4EC; color: #444;
                 border: 1px solid #ccc; border-radius: 4px;
                 padding: 4px 8px; font-size: 12px;
             }
-            QPushButton:hover { background: rgba(220,220,230,240); color: #222; }
+            QPushButton:hover { background: #D4D4DC; color: #222; }
         """)
         custom_btn.clicked.connect(self._on_custom)
         layout.addWidget(custom_btn)
@@ -140,6 +140,14 @@ class ToolSettingsPopup(QWidget):
         width_layout.addWidget(self._w_slider)
         width_layout.addWidget(self._w_value)
         layout.addLayout(width_layout)
+
+    def paintEvent(self, event) -> None:  # noqa: N802
+        """Draw a solid background with rounded corners."""
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+        painter.setBrush(self._bg_color)
+        painter.setPen(QPen(self._border_color, 1))
+        painter.drawRoundedRect(self.rect().adjusted(1, 1, -1, -1), 8, 8)
 
     def _on_width_value_changed(self, value: int) -> None:
         self._w_value.setText(str(value))
@@ -173,24 +181,36 @@ class ToolBarWindow(QWidget):
     redo_requested = Signal()
     clear_requested = Signal()
     hide_requested = Signal()
-    pen_settings_changed = Signal(QColor, float)
-    highlighter_settings_changed = Signal(QColor, float)
+    tool_settings_changed = Signal(ToolType, QColor, float)
 
     TOOL_BUTTON_DATA: list[tuple[str, ToolType]] = [
         ("✏️", ToolType.PEN),
+        ("\U0001f58a️", ToolType.PEN2),   # 🖊️
+        ("✒️", ToolType.PEN3),
         ("\U0001f58d️", ToolType.HIGHLIGHTER),
         ("\U0001f9f9", ToolType.ERASER),
     ]
+
+    # ── Tool display names for popup titles ──────────────────────
+    _TOOL_POPUP_NAMES: dict[ToolType, str] = {
+        ToolType.PEN: "✏️ Pen",
+        ToolType.PEN2: "\U0001f58a️ Pen 2",
+        ToolType.PEN3: "✒️ Pen 3",
+        ToolType.HIGHLIGHTER: "\U0001f58d️ Highlighter",
+    }
 
     def __init__(self, parent: QWidget | None = None):
         super().__init__(parent)
         self._drag_pos: QPoint | None = None
         self._current_tool: ToolType = ToolType.PEN
-        # Per-tool independent settings
-        self._pen_color: QColor = QColor(255, 0, 0)
-        self._pen_width: float = 3.0
-        self._highlighter_color: QColor = QColor(255, 238, 0)
-        self._highlighter_width: float = 12.0
+
+        # Per-tool independent settings stored in a dict
+        self._tool_settings: dict[ToolType, tuple[QColor, float]] = {
+            ToolType.PEN: (QColor(255, 0, 0), 3.0),
+            ToolType.PEN2: (QColor(0, 100, 255), 3.0),
+            ToolType.PEN3: (QColor(0, 180, 0), 3.0),
+            ToolType.HIGHLIGHTER: (QColor(255, 238, 0), 12.0),
+        }
         # Swatch and width label references for display update
         self._tool_swatches: dict[ToolType, QPushButton] = {}
         self._tool_width_labels: dict[ToolType, QPushButton] = {}
@@ -321,10 +341,9 @@ class ToolBarWindow(QWidget):
             self._tool_group.addButton(btn, tool.value)
             row.addWidget(btn)
 
-            # Inline color swatch + width label for PEN and HIGHLIGHTER
-            if tool in (ToolType.PEN, ToolType.HIGHLIGHTER):
-                color = self._pen_color if tool == ToolType.PEN else self._highlighter_color
-                width_val = self._pen_width if tool == ToolType.PEN else self._highlighter_width
+            # Inline color swatch + width label for all non-eraser tools
+            if tool != ToolType.ERASER:
+                color, width_val = self._tool_settings.get(tool, (QColor(0, 0, 0), 3.0))
 
                 swatch = QPushButton()
                 swatch.setFixedSize(14, 14)
@@ -366,12 +385,8 @@ class ToolBarWindow(QWidget):
                 """)
                 self._tool_width_labels[tool] = wlabel
 
-                if tool == ToolType.PEN:
-                    swatch.clicked.connect(self._show_pen_settings)
-                    wlabel.clicked.connect(self._show_pen_settings)
-                else:
-                    swatch.clicked.connect(self._show_highlighter_settings)
-                    wlabel.clicked.connect(self._show_highlighter_settings)
+                swatch.clicked.connect(lambda checked, t=tool: self._show_tool_settings_for(t))
+                wlabel.clicked.connect(lambda checked, t=tool: self._show_tool_settings_for(t))
 
                 row.addWidget(swatch)
                 row.addWidget(wlabel)
@@ -457,29 +472,21 @@ class ToolBarWindow(QWidget):
         tool = ToolType(tool_id)
         self._current_tool = tool
         self.tool_changed.emit(tool)
-        if tool == ToolType.PEN:
-            self.color_changed.emit(self._pen_color)
-            self.width_changed.emit(self._pen_width)
-        elif tool == ToolType.HIGHLIGHTER:
-            self.color_changed.emit(self._highlighter_color)
-            self.width_changed.emit(self._highlighter_width)
+        if tool in self._tool_settings:
+            color, width = self._tool_settings[tool]
+            self.color_changed.emit(color)
+            self.width_changed.emit(width)
 
     # ------------------------------------------------------------------
     # Per-tool settings popups
     # ------------------------------------------------------------------
 
-    def _show_pen_settings(self) -> None:
-        self._show_tool_settings(
-            ToolType.PEN, self._pen_color, self._pen_width, "✏️ Pen"
-        )
-
-    def _show_highlighter_settings(self) -> None:
-        self._show_tool_settings(
-            ToolType.HIGHLIGHTER,
-            self._highlighter_color,
-            self._highlighter_width,
-            "\U0001f58d️ Highlighter",
-        )
+    def _show_tool_settings_for(self, tool: ToolType) -> None:
+        if tool not in self._tool_settings:
+            return
+        color, width = self._tool_settings[tool]
+        name = self._TOOL_POPUP_NAMES.get(tool, tool.name)
+        self._show_tool_settings(tool, color, width, name)
 
     def _show_tool_settings(
         self,
@@ -490,20 +497,12 @@ class ToolBarWindow(QWidget):
     ) -> None:
         popup = ToolSettingsPopup(color, width, name, self)
 
-        if tool == ToolType.PEN:
-            popup.color_selected.connect(
-                lambda c: self._on_pen_settings_changed(c, self._pen_width)
-            )
-            popup.width_changed.connect(
-                lambda w: self._on_pen_settings_changed(self._pen_color, w)
-            )
-        else:
-            popup.color_selected.connect(
-                lambda c: self._on_highlighter_settings_changed(c, self._highlighter_width)
-            )
-            popup.width_changed.connect(
-                lambda w: self._on_highlighter_settings_changed(self._highlighter_color, w)
-            )
+        popup.color_selected.connect(
+            lambda c, t=tool: self._on_tool_settings_changed(t, c, self._tool_settings[t][1])
+        )
+        popup.width_changed.connect(
+            lambda w, t=tool: self._on_tool_settings_changed(t, self._tool_settings[t][0], w)
+        )
 
         swatch = self._tool_swatches.get(tool)
         if swatch:
@@ -511,21 +510,11 @@ class ToolBarWindow(QWidget):
             popup.move(pos)
         popup.show()
 
-    def _on_pen_settings_changed(self, color: QColor, width: float) -> None:
-        self._pen_color = color
-        self._pen_width = width
-        self._update_swatch_display(ToolType.PEN, color, width)
-        self.pen_settings_changed.emit(color, width)
-        if self._current_tool == ToolType.PEN:
-            self.color_changed.emit(color)
-            self.width_changed.emit(width)
-
-    def _on_highlighter_settings_changed(self, color: QColor, width: float) -> None:
-        self._highlighter_color = color
-        self._highlighter_width = width
-        self._update_swatch_display(ToolType.HIGHLIGHTER, color, width)
-        self.highlighter_settings_changed.emit(color, width)
-        if self._current_tool == ToolType.HIGHLIGHTER:
+    def _on_tool_settings_changed(self, tool: ToolType, color: QColor, width: float) -> None:
+        self._tool_settings[tool] = (color, width)
+        self._update_swatch_display(tool, color, width)
+        self.tool_settings_changed.emit(tool, color, width)
+        if self._current_tool == tool:
             self.color_changed.emit(color)
             self.width_changed.emit(width)
 
@@ -558,15 +547,10 @@ class ToolBarWindow(QWidget):
     # Public helpers used by the app coordinator
     # ------------------------------------------------------------------
 
-    def set_pen_settings(self, color: QColor, width: float) -> None:
-        self._pen_color = color
-        self._pen_width = width
-        self._update_swatch_display(ToolType.PEN, color, width)
-
-    def set_highlighter_settings(self, color: QColor, width: float) -> None:
-        self._highlighter_color = color
-        self._highlighter_width = width
-        self._update_swatch_display(ToolType.HIGHLIGHTER, color, width)
+    def set_tool_settings(self, tool: ToolType, color: QColor, width: float) -> None:
+        if tool in self._tool_settings:
+            self._tool_settings[tool] = (color, width)
+            self._update_swatch_display(tool, color, width)
 
     def set_eraser_width(self, width: float) -> None:
         self._eraser_slider.setValue(int(round(width)))

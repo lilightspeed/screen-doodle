@@ -34,6 +34,10 @@ class ScreenDoodleApp(QObject):
         "default_tool": ToolType.PEN.value,
         "pen_color": "#FF0000",
         "pen_width": 3.0,
+        "pen2_color": "#0064FF",
+        "pen2_width": 3.0,
+        "pen3_color": "#00B400",
+        "pen3_width": 3.0,
         "highlighter_color": "#FFEE00",
         "highlighter_width": 12.0,
         "eraser_width": 20.0,
@@ -127,8 +131,7 @@ class ScreenDoodleApp(QObject):
         self.toolbar.hide_requested.connect(self.toggle_drawing_mode)
 
         # Settings persistence — per-tool settings + tool + eraser
-        self.toolbar.pen_settings_changed.connect(self._on_pen_settings_changed)
-        self.toolbar.highlighter_settings_changed.connect(self._on_highlighter_settings_changed)
+        self.toolbar.tool_settings_changed.connect(self._on_tool_settings_changed)
         self.toolbar.eraser_width_changed.connect(self._on_eraser_width_changed)
         self.toolbar.tool_changed.connect(self._on_tool_changed)
 
@@ -234,14 +237,19 @@ class ScreenDoodleApp(QObject):
     # Settings persistence
     # ------------------------------------------------------------------
 
-    def _on_pen_settings_changed(self, color: QColor, width: float) -> None:
-        self._settings["pen_color"] = color.name()
-        self._settings["pen_width"] = width
-        self._save_settings()
-
-    def _on_highlighter_settings_changed(self, color: QColor, width: float) -> None:
-        self._settings["highlighter_color"] = color.name()
-        self._settings["highlighter_width"] = width
+    def _on_tool_settings_changed(self, tool: ToolType, color: QColor, width: float) -> None:
+        if tool == ToolType.PEN:
+            self._settings["pen_color"] = color.name()
+            self._settings["pen_width"] = width
+        elif tool == ToolType.PEN2:
+            self._settings["pen2_color"] = color.name()
+            self._settings["pen2_width"] = width
+        elif tool == ToolType.PEN3:
+            self._settings["pen3_color"] = color.name()
+            self._settings["pen3_width"] = width
+        elif tool == ToolType.HIGHLIGHTER:
+            self._settings["highlighter_color"] = color.name()
+            self._settings["highlighter_width"] = width
         self._save_settings()
 
     def _on_eraser_width_changed(self, width: float) -> None:
@@ -315,13 +323,19 @@ class ScreenDoodleApp(QObject):
     def _apply_settings(self) -> None:
         pen_color = QColor(self._settings.get("pen_color", "#FF0000"))
         pen_width = self._settings.get("pen_width", 3.0)
+        pen2_color = QColor(self._settings.get("pen2_color", "#0064FF"))
+        pen2_width = self._settings.get("pen2_width", 3.0)
+        pen3_color = QColor(self._settings.get("pen3_color", "#00B400"))
+        pen3_width = self._settings.get("pen3_width", 3.0)
         hl_color = QColor(self._settings.get("highlighter_color", "#FFEE00"))
         hl_width = self._settings.get("highlighter_width", 12.0)
         tool_val = self._settings.get("default_tool", ToolType.PEN.value)
         eraser_width = self._settings.get("eraser_width", 20.0)
 
-        self.toolbar.set_pen_settings(pen_color, pen_width)
-        self.toolbar.set_highlighter_settings(hl_color, hl_width)
+        self.toolbar.set_tool_settings(ToolType.PEN, pen_color, pen_width)
+        self.toolbar.set_tool_settings(ToolType.PEN2, pen2_color, pen2_width)
+        self.toolbar.set_tool_settings(ToolType.PEN3, pen3_color, pen3_width)
+        self.toolbar.set_tool_settings(ToolType.HIGHLIGHTER, hl_color, hl_width)
         self.toolbar.set_eraser_width(eraser_width)
 
         try:
