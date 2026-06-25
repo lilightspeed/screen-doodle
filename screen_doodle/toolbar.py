@@ -133,8 +133,7 @@ class ToolBarWindow(QWidget):
     undo_requested = Signal()
     redo_requested = Signal()
     clear_requested = Signal()
-    screenshot_requested = Signal()
-    quit_requested = Signal()
+    hide_requested = Signal()
 
     TOOL_BUTTON_DATA: list[tuple[str, ToolType]] = [
         ("✏️", ToolType.PEN),
@@ -326,28 +325,17 @@ class ToolBarWindow(QWidget):
         main_layout.addWidget(self._redo_btn)
         main_layout.addWidget(self._clear_btn)
 
-        main_layout.addWidget(self._sep())
-
-        # -- Screenshot --
-        self._screenshot_btn = QToolButton()
-        self._screenshot_btn.setText("📷")
-        self._screenshot_btn.setToolTip("Screenshot background")
-        self._screenshot_btn.setStyleSheet(
-            self._screenshot_btn.styleSheet() + "QToolButton { font-size: 14px; }"
-        )
-        main_layout.addWidget(self._screenshot_btn)
-
-        # Spacer + Quit
+        # Spacer + Hide
         main_layout.addStretch()
-        self._quit_btn = QPushButton("✕")
-        self._quit_btn.setFixedSize(22, 22)
-        self._quit_btn.setToolTip("Quit")
-        self._quit_btn.setStyleSheet(
-            "QPushButton { color: #d44; font-size: 14px; "
+        self._hide_btn = QPushButton("─")
+        self._hide_btn.setFixedSize(22, 22)
+        self._hide_btn.setToolTip("Hide (Esc)")
+        self._hide_btn.setStyleSheet(
+            "QPushButton { color: #666; font-size: 14px; "
             "background: transparent; border: none; }"
-            "QPushButton:hover { color: #b00; }"
+            "QPushButton:hover { color: #222; }"
         )
-        main_layout.addWidget(self._quit_btn)
+        main_layout.addWidget(self._hide_btn)
 
         # Default tool: PEN selected
         pen_btn = self._tool_group.button(ToolType.PEN.value)
@@ -381,8 +369,7 @@ class ToolBarWindow(QWidget):
         self._undo_btn.clicked.connect(self.undo_requested.emit)
         self._redo_btn.clicked.connect(self.redo_requested.emit)
         self._clear_btn.clicked.connect(self.clear_requested.emit)
-        self._screenshot_btn.clicked.connect(self.screenshot_requested.emit)
-        self._quit_btn.clicked.connect(self.quit_requested.emit)
+        self._hide_btn.clicked.connect(self.hide_requested.emit)
 
     # ------------------------------------------------------------------
     # Slots

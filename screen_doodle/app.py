@@ -11,7 +11,6 @@ from PySide6.QtWidgets import (
     QSystemTrayIcon,
 )
 
-from .capture_service import capture_screen
 from .models import ToolType
 from .overlay import OverlayWindow
 from .toolbar import ToolBarWindow
@@ -124,8 +123,7 @@ class ScreenDoodleApp(QObject):
             self.toolbar.clear_requested.connect(canvas.clear_all)
             self.toolbar.eraser_width_changed.connect(canvas.set_eraser_width)
 
-        self.toolbar.screenshot_requested.connect(self._on_screenshot)
-        self.toolbar.quit_requested.connect(self._on_quit)
+        self.toolbar.hide_requested.connect(self.toggle_drawing_mode)
 
         # Settings persistence — persist every change
         self.toolbar.width_changed.connect(self._on_width_changed)
@@ -218,24 +216,6 @@ class ScreenDoodleApp(QObject):
         for overlay in self.overlays:
             overlay.canvas.redo()
             break
-
-    def _on_screenshot(self) -> None:
-        """Capture screen as frozen background for all canvases."""
-        was_drawing = self._drawing_mode
-
-        # Hide overlays so the screenshot doesn't capture them
-        for overlay in self.overlays:
-            overlay.hide()
-        QApplication.processEvents()
-
-        for overlay in self.overlays:
-            pixmap = capture_screen(overlay._screen)
-            if pixmap is not None:
-                overlay.canvas.set_background(pixmap)
-
-        if was_drawing:
-            for overlay in self.overlays:
-                overlay.enter_drawing_mode()
 
     def _on_quit(self) -> None:
         self._unregister_mode_hotkeys()

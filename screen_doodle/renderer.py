@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from PySide6.QtCore import QPointF
 from PySide6.QtGui import (
     QColor,
     QPainter,
@@ -81,14 +80,13 @@ def _draw_eraser(painter: QPainter, stroke: Stroke, is_preview: bool) -> None:
     painter.setPen(pen)
     painter.setBrush(Qt.NoBrush)
 
+    # Use lineTo for the same reason as _draw_freehand — bezier midpoint
+    # interpolation truncates the final half-step, causing visible gaps
+    # at direction reversals.
     path = QPainterPath()
     path.moveTo(stroke.points[0])
-    for i in range(len(stroke.points) - 1):
-        mid = QPointF(
-            (stroke.points[i].x() + stroke.points[i + 1].x()) / 2.0,
-            (stroke.points[i].y() + stroke.points[i + 1].y()) / 2.0,
-        )
-        path.quadTo(stroke.points[i], mid)
+    for pt in stroke.points[1:]:
+        path.lineTo(pt)
     painter.drawPath(path)
 
     # Restore composition mode for subsequent strokes
@@ -96,7 +94,13 @@ def _draw_eraser(painter: QPainter, stroke: Stroke, is_preview: bool) -> None:
 
 
 def _draw_freehand(painter: QPainter, stroke: Stroke, is_preview: bool) -> None:
-    """Draw a smooth freehand path using quadratic Bézier curves."""
+    """Draw a freehand path by connecting data points with straight segments.
+
+    Using ``lineTo`` with ``RoundCap`` / ``RoundJoin`` gives a smooth
+    appearance while ensuring the stroke exactly follows the mouse path —
+    unlike quadratic Bézier midpoint interpolation, which truncates the last
+    half-step and creates visible clipping at direction reversals.
+    """
     if len(stroke.points) < 2:
         return
 
@@ -108,12 +112,8 @@ def _draw_freehand(painter: QPainter, stroke: Stroke, is_preview: bool) -> None:
 
     path = QPainterPath()
     path.moveTo(stroke.points[0])
-    for i in range(len(stroke.points) - 1):
-        mid = QPointF(
-            (stroke.points[i].x() + stroke.points[i + 1].x()) / 2.0,
-            (stroke.points[i].y() + stroke.points[i + 1].y()) / 2.0,
-        )
-        path.quadTo(stroke.points[i], mid)
+    for pt in stroke.points[1:]:
+        path.lineTo(pt)
     painter.drawPath(path)
 
 
