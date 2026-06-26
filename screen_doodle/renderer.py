@@ -134,19 +134,30 @@ def _add_smooth_path(path: QPainterPath, points: list[QPointF]) -> None:
 
         interval = knots[i + 1] - knots[i]
 
-        # Centripetal Catmull-Rom → cubic Bezier control points.
-        # CP₁ = Pᵢ + (tᵢ₊₁−tᵢ) · (Pᵢ₊₁−Pᵢ₋₁) / 3·(tᵢ₊₁−tᵢ₋₁)
-        # CP₂ = Pᵢ₊₁ − (tᵢ₊₁−tᵢ) · (Pᵢ₊₂−Pᵢ) / 3·(tᵢ₊₂−tᵢ)
-        dx1, dy1 = _tangent(
-            points[max(0, i - 1)],
-            p2,
-            knots[i + 1] - knots[max(0, i - 1)],
-        )
+        # ── Tangent at Pᵢ (controls CP₁) ──────────────────────────────
+        if i == 0:
+            # Reflected virtual point P₋₁ = 2·P₀ − P₁ so the first cubic
+            # Bézier segment curves naturally from the very first stroke
+            # segment instead of aiming directly at P₁.
+            p_minus_1_x = 2 * p1.x() - p2.x()
+            p_minus_1_y = 2 * p1.y() - p2.y()
+            k_minus_1 = -knots[1]
+            dt = knots[1] - k_minus_1
+            dx1 = (p2.x() - p_minus_1_x) / dt
+            dy1 = (p2.y() - p_minus_1_y) / dt
+        else:
+            dx1, dy1 = _tangent(
+                points[i - 1],
+                p2,
+                knots[i + 1] - knots[i - 1],
+            )
+
         cp1 = QPointF(
             p1.x() + interval * dx1 / 3.0,
             p1.y() + interval * dy1 / 3.0,
         )
 
+        # ── Tangent at Pᵢ₊₁ (controls CP₂) ──────────────────────────────
         dx2, dy2 = _tangent(
             p1,
             points[min(n - 1, i + 2)],
@@ -185,12 +196,25 @@ def _catmull_rom_points(
         t2 = knots[i + 1]
         interval = t2 - t1
 
-        # Centripetal tangents at the two endpoints of this segment
-        dx1, dy1 = _tangent(
-            points[max(0, i - 1)],
-            p2,
-            t2 - knots[max(0, i - 1)],
-        )
+        # ── Tangent at Pᵢ ──────────────────────────────────────────────
+        if i == 0:
+            # Virtual reflected point P₋₁ = 2·P₀ − P₁ gives the Catmull-Rom
+            # spline a proper 4-point setup so the first segment curves
+            # naturally from the very beginning.
+            #   P₋₁ = 2·P₀ − P₁        (mirror P₁ across P₀)
+            #   knots[-1] = −knots[1]  (same α-distance as P₀→P₁)
+            k_minus_1 = -t2
+            dt = t2 - k_minus_1  # 2·t2
+            dx1 = (p2.x() - (2 * p1.x() - p2.x())) / dt  # = (P₁.x − P₀.x) / t2
+            dy1 = (p2.y() - (2 * p1.y() - p2.y())) / dt
+        else:
+            dx1, dy1 = _tangent(
+                points[i - 1],
+                p2,
+                t2 - knots[i - 1],
+            )
+
+        # ── Tangent at Pᵢ₊₁ ────────────────────────────────────────────
         dx2, dy2 = _tangent(
             p1,
             points[min(n - 1, i + 2)],
@@ -334,12 +358,44 @@ def _draw_variable_width(
 
     seg = cfg.interpolation_segments
 
-    if n < 3 or seg < 2:
-        # Too few points for Catmull-Rom — draw as-is
+    if n < 3:
+        # Only 2 points — subdivide the long first segment into smaller
+        # pieces with smoothly interpolated widths so the initial stroke
+        # doesn't look like a crude straight line while waiting for more
+        # mouse events to arrive.
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.setBrush(Qt.NoBrush)
+        p0, p1 = points[0], points[1]
+        w0, w1 = widths[0], widths[-1]
+        dx = p1.x() - p0.x()
+        dy = p1.y() - p0.y()
+        dist = math.hypot(dx, dy)
+        num_seg = max(1, min(int(dist / cfg.subdivision_pixel_gap), 24))
+        if num_seg <= 1:
+            sw = max((w0 + w1) * 0.5, cfg.min_segment_width)
+            pen = QPen(color, sw, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin)
+            painter.setPen(pen)
+            painter.drawLine(p0, p1)
+        else:
+            for j in range(num_seg):
+                t0 = j / num_seg
+                t1 = (j + 1) / num_seg
+                sw = w0 + ((t0 + t1) * 0.5) * (w1 - w0)
+                if sw < cfg.min_segment_width:
+                    sw = cfg.min_segment_width
+                pen = QPen(color, sw, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin)
+                painter.setPen(pen)
+                painter.drawLine(
+                    QPointF(p0.x() + t0 * dx, p0.y() + t0 * dy),
+                    QPointF(p0.x() + t1 * dx, p0.y() + t1 * dy),
+                )
+        return
+    elif seg < 2:
+        # Catmull-Rom disabled in config — fall back to raw segments
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         painter.setBrush(Qt.NoBrush)
         for i in range(n - 1):
-            seg_w = (widths[i] + widths[i + 1]) / 2.0
+            seg_w = (widths[i] + widths[i + 1]) * 0.5
             if seg_w < cfg.min_segment_width:
                 seg_w = cfg.min_segment_width
             pen = QPen(color, seg_w, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin)

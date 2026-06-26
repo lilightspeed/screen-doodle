@@ -220,6 +220,54 @@ keyboard>=0.13      # 全局热键
 - [x] 设置自动保存（每次变更即时写盘）
 - [x] 工具栏位置持久化
 
+## 笔迹调节配置 (`stroke_profile.json`)
+
+项目根目录的 `stroke_profile.json` 用于调节笔迹渲染参数。修改后重启应用即可生效；删除此文件可重新生成默认值。
+
+```json
+{
+  "_comment": "...",
+  "velocity": {
+    "sample_interval": 4,
+    "smoothing_alpha": 0.35,
+    "thin_mult": 0.4,
+    "thick_mult": 2.5,
+    "ref_dist": 10.0,
+    "power_exponent": 0.7
+  },
+  "rendering": {
+    "min_segment_width": 0.5,
+    "preview_opacity": 1.0,
+    "highlighter_opacity_scale": 0.3,
+    "highlighter_width_scale": 4.0,
+    "interpolation_segments": 3,
+    "subdivision_pixel_gap": 4.0
+  }
+}
+```
+
+### velocity 速度感应
+
+| 字段 | 默认值 | 说明 |
+|------|--------|------|
+| `sample_interval` | `4` | 每 N 个鼠标事件重新计算一次笔迹宽度（越大越平滑但响应越慢） |
+| `smoothing_alpha` | `0.35` | 指数平滑因子（越小过渡越平滑，越大笔锋越灵敏） |
+| `thin_mult` | `0.4` | 最快速度时的最小宽度倍率 |
+| `thick_mult` | `2.5` | 最慢速度时的最大宽度倍率 |
+| `ref_dist` | `10.0` | 速度曲线半程参考距离（像素） |
+| `power_exponent` | `0.7` | 速度-宽度曲线形状（<1 低速段更敏感） |
+
+### rendering 渲染质量
+
+| 字段 | 默认值 | 说明 |
+|------|--------|------|
+| `min_segment_width` | `0.5` | 每小段最小绘制宽度（防止零宽度导致不可见） |
+| `preview_opacity` | `1.0` | 笔迹预览透明度倍率 |
+| `highlighter_opacity_scale` | `0.3` | 荧光笔额外透明度倍率 |
+| `highlighter_width_scale` | `4.0` | 荧光笔宽度倍率（在基础宽度上放大） |
+| `interpolation_segments` | `3` | Catmull-Rom 每对控制点之间的插值段数（越高曲线越平滑） |
+| `subdivision_pixel_gap` | `4.0` | **起笔细分密度**：当鼠标快速移动导致前两个采样点距离过大时，每多少像素插入一个子段（越小细分越密，起笔越平滑；过大则可能看到直线起始段） |
+
 ## 待实现功能（Phase 3 & 4）
 
 - [ ] 截图底图（PIL.ImageGrab.grab() → set_background，toolbar 添加快照按钮）

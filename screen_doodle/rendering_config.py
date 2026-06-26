@@ -54,6 +54,12 @@ class StrokeConfig:
     interpolation_segments: int = 8
     """Catmull-Rom sub‑segments per control‑point pair (higher = smoother curve)."""
 
+    subdivision_pixel_gap: float = 4.0
+    """Max pixel distance between sub‑segments when subdividing a sparse 2‑point
+    initial stroke (lower = finer subdivision, more computationally expensive).
+    Only used during the transient phase before enough mouse events arrive for
+    Catmull-Rom interpolation."""
+
 
 # ---------------------------------------------------------------------------
 # JSON file management
@@ -93,6 +99,7 @@ def _write_defaults(path: str) -> None:
             "highlighter_opacity_scale": cfg.highlighter_opacity_scale,
             "highlighter_width_scale": cfg.highlighter_width_scale,
             "interpolation_segments": cfg.interpolation_segments,
+            "subdivision_pixel_gap": cfg.subdivision_pixel_gap,
         },
     }
     os.makedirs(os.path.dirname(path), exist_ok=True)
@@ -167,6 +174,10 @@ def load_stroke_config() -> StrokeConfig:
         pass
     try:
         cfg.interpolation_segments = int(rnd.get("interpolation_segments", cfg.interpolation_segments))
+    except (TypeError, ValueError):
+        pass
+    try:
+        cfg.subdivision_pixel_gap = float(rnd.get("subdivision_pixel_gap", cfg.subdivision_pixel_gap))
     except (TypeError, ValueError):
         pass
 
