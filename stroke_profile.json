@@ -1,0 +1,17 @@
+{
+  "_comment": "Stroke tuning profile.\nEdit any value and restart the app to apply.\nDelete this file to regenerate defaults.",
+  "velocity": {
+    "sample_interval": 4,
+    "smoothing_alpha": 0.12,
+    "thin_mult": 0.4,
+    "thick_mult": 2.5,
+    "ref_dist": 20.0,
+    "power_exponent": 0.7
+  },
+  "rendering": {
+    "min_segment_width": 0.5,
+    "preview_opacity": 0.7,
+    "highlighter_opacity_scale": 0.3,
+    "highlighter_width_scale": 4.0
+  }
+}

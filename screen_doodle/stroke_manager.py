@@ -6,16 +6,10 @@ from PySide6.QtCore import QObject, Signal
 from PySide6.QtCore import QPointF
 
 from .models import Stroke, ToolType
+from .rendering_config import cfg
 
-# ── Velocity-to-width mapping constants ──────────────────────────────────
 # Only these tools get dynamic width based on drawing speed.
 _VELOCITY_TOOLS = {ToolType.PEN, ToolType.PEN2, ToolType.PEN3}
-
-_THIN_MULT = 0.4      # fastest drawing → 0.4× base width (thin)
-_THICK_MULT = 2.5     # slowest drawing → 2.5× base width (thick)
-_REF_DIST = 20.0      # pixel distance at which the curve is roughly halfway
-_ALPHA = 0.12         # exponential smoothing factor (lower = smoother, slower response)
-_SAMPLE_INTERVAL = 4  # recalculate width every N points (lower frequency = smoother)
 
 
 class StrokeManager(QObject):
@@ -75,8 +69,8 @@ class StrokeManager(QObject):
             self._accumulated_dist += dist
             self._velocity_counter += 1
 
-            if self._velocity_counter >= _SAMPLE_INTERVAL:
-                avg_dist = self._accumulated_dist / _SAMPLE_INTERVAL
+            if self._velocity_counter >= cfg.sample_interval:
+                avg_dist = self._accumulated_dist / cfg.sample_interval
                 prev = self._current.point_widths[-1] if self._current.point_widths else None
                 w = self._compute_point_width(self._current.width, avg_dist, prev)
                 self._velocity_counter = 0
@@ -100,13 +94,13 @@ class StrokeManager(QObject):
         Small distance (slow) → wide, large distance (fast) → narrow.
         Exponential smoothing prevents width jitter from mouse noise.
         """
-        t = min(distance / _REF_DIST, 1.0)
-        # Inverted curve: t=0 → THICK_MULT, t=1 → THIN_MULT
-        raw_mult = _THICK_MULT - (_THICK_MULT - _THIN_MULT) * (t ** 0.7)
+        t = min(distance / cfg.ref_dist, 1.0)
+        # Inverted curve: t=0 → thick, t=1 → thin
+        raw_mult = cfg.thick_mult - (cfg.thick_mult - cfg.thin_mult) * (t ** cfg.power_exponent)
 
         if prev_width is not None:
             prev_mult = prev_width / base_width
-            smoothed = _ALPHA * raw_mult + (1 - _ALPHA) * prev_mult
+            smoothed = cfg.smoothing_alpha * raw_mult + (1 - cfg.smoothing_alpha) * prev_mult
         else:
             smoothed = raw_mult
 

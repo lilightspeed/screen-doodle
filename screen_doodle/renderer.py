@@ -9,6 +9,7 @@ from PySide6.QtGui import (
 )
 
 from .models import Stroke, ToolType
+from .rendering_config import cfg
 
 
 def render_stroke(
@@ -49,9 +50,9 @@ def _pen_and_brush(
     width = stroke.width
 
     if stroke.tool == ToolType.HIGHLIGHTER:
-        alpha = int(255 * stroke.opacity * 0.3)
+        alpha = int(255 * stroke.opacity * cfg.highlighter_opacity_scale)
         color.setAlpha(alpha)
-        width *= 4
+        width *= cfg.highlighter_width_scale
     else:
         alpha = int(255 * stroke.opacity)
         color.setAlpha(alpha)
@@ -62,7 +63,7 @@ def _pen_and_brush(
 
 def _apply_preview(painter: QPainter) -> None:
     """Make the painter draw semi-transparently for preview."""
-    painter.setOpacity(0.7)
+    painter.setOpacity(cfg.preview_opacity)
 
 
 # ---------------------------------------------------------------------------
@@ -157,8 +158,8 @@ def _draw_variable_width(painter: QPainter, stroke: Stroke, is_preview: bool) ->
 
     for i in range(n - 1):
         seg_w = (widths[i] + widths[i + 1]) / 2.0
-        if seg_w < 0.5:
-            seg_w = 0.5
+        if seg_w < cfg.min_segment_width:
+            seg_w = cfg.min_segment_width
         pen = QPen(color, seg_w, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin)
         painter.setPen(pen)
         painter.drawLine(points[i], points[i + 1])
