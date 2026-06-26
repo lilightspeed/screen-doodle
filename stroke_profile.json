@@ -14,6 +14,8 @@
     "highlighter_opacity_scale": 0.3,
     "highlighter_width_scale": 4.0,
     "interpolation_segments": 3,
-    "subdivision_pixel_gap": 8
+    "subdivision_pixel_gap": 8.0,
+    "max_point_gap": 8.0,
+    "max_densify_insert": 16
   }
 }

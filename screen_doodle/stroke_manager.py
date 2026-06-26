@@ -33,10 +33,18 @@ class StrokeManager(QObject):
         opacity: float,
         tool: ToolType,
     ) -> Stroke:
-        """Begin a new stroke at the given point. Clears the redo stack."""
+        """Begin a new stroke at the given point. Clears the redo stack.
+
+        The first real mouse-move event (via ``add_point``) will *absorb* this
+        starting point — replacing it rather than appending — so the
+        press-position → first-move segment (a long straight line when drawing
+        fast) is never created.  The stroke visibly starts at the first
+        movement position.
+        """
         self.redo_stack.clear()
         self._velocity_counter = 0
         self._accumulated_dist = 0.0
+        self._absorb_first_point = True
         self._current = Stroke(
             points=[point],
             color=color,
@@ -52,13 +60,34 @@ class StrokeManager(QObject):
     def add_point(self, point: QPointF) -> None:
         """Append a point to the in-progress stroke.
 
+        **First-point absorption**
+        The very first call after ``start_stroke`` *replaces* the press
+        position instead of appending — this eliminates the long straight
+        line that appears when the mouse has already moved a significant
+        distance by the time the first ``mouseMoveEvent`` fires.
+
         For velocity-sensitive tools (PEN / PEN2 / PEN3), the width is
         recalculated only every ``_SAMPLE_INTERVAL`` points using the
         *average* distance over that window.  Between recalculations the
         last computed width is reused, which reduces jitter and makes the
         stroke feel more stable.
+
+        After appending, the segment is automatically densified when the
+        gap exceeds *max_point_gap* — Catmull-Rom interpolated intermediate
+        points (carrying curvature from neighbouring points) are injected
+        so the renderer always has dense geometry for smooth curves.
         """
         if self._current is None:
+            return
+
+        # ── Absorb the first real move into the press-position ──────────
+        # This discards the press→first-move "straight line" artifact and
+        # makes the stroke visibly start at the first movement position.
+        if self._absorb_first_point:
+            self._current.points[0] = point
+            # Width stays at base_width (set in start_stroke) — there is no
+            # predecessor distance to compute a velocity yet.
+            self._absorb_first_point = False
             return
 
         last = self._current.points[-1]
@@ -83,6 +112,139 @@ class StrokeManager(QObject):
         self._current.points.append(point)
         self._current.point_widths.append(w)
 
+        # ── Densify the segment just added ──────────────────────────────
+        self._densify_last_segment()
+
+    # ------------------------------------------------------------------
+    # Adaptive segment densification
+    # ------------------------------------------------------------------
+
+    def _densify_last_segment(self) -> None:
+        """Insert Catmull-Rom interpolated points on the last segment if sparse.
+
+        When the distance between the last two collected points exceeds
+        *max_point_gap*, this method replaces the raw segment with a set of
+        Hermite-interpolated sub‑segments that carry through the curvature
+        implied by earlier neighbouring points.  The result is a uniformly
+        dense point stream — even near the start of a fast stroke — so the
+        Catmull-Rom renderer always has enough geometry to produce smooth
+        curves without relying on collinear subdivision.
+
+        **4‑point Catmull‑Rom window**
+
+            [Pᵢ₋₁, P_start, P_end, Pᵢ₊₁]
+
+        *P_start/P_end* are the last two raw input points.  *Pᵢ₋₁* is drawn
+        from the available history (or synthesised by reflection when this
+        is the very first segment).  *Pᵢ₊₁* is extrapolated from the current
+        direction so the tangent at *P_end* has a natural look‑ahead.
+
+        Widths are linearly interpolated along the segment — the velocity‑
+        derived profile from the real mouse events is preserved unchanged.
+        """
+        pts = self._current.points
+        wids = self._current.point_widths
+        n = len(pts)
+        if n < 2:
+            return
+
+        p_start = pts[-2]
+        p_end = pts[-1]
+        w_start = wids[-2]
+        w_end = wids[-1]
+
+        dx = p_end.x() - p_start.x()
+        dy = p_end.y() - p_start.y()
+        seg_dist = math.hypot(dx, dy)
+
+        if seg_dist <= cfg.max_point_gap:
+            return
+
+        num = min(int(seg_dist / cfg.max_point_gap), cfg.max_densify_insert)
+        if num < 1:
+            return
+
+        # ---- Build the 4-point Catmull-Rom window ----
+        # Temporarily pop the endpoint — it goes back after interpolation.
+        pts.pop()
+        wids.pop()
+        n -= 1
+
+        if n >= 2:
+            p_prev = pts[-2]          # Pᵢ₋₂ — real predecessor
+        else:
+            # Very first segment — reflect P_end across P_start.
+            p_prev = QPointF(
+                2 * p_start.x() - p_end.x(),
+                2 * p_start.y() - p_end.y(),
+            )
+
+        # Look‑ahead point (direction-keeping extrapolation).
+        p_next = QPointF(
+            2 * p_end.x() - p_start.x(),
+            2 * p_end.y() - p_start.y(),
+        )
+
+        # ---- Centripetal (α = 0.5) knots ----
+        d_pp = math.hypot(p_start.x() - p_prev.x(), p_start.y() - p_prev.y())
+        d_pe = math.hypot(p_end.x() - p_start.x(), p_end.y() - p_start.y())
+        d_en = math.hypot(p_next.x() - p_end.x(), p_next.y() - p_end.y())
+
+        k0 = 0.0
+        k1 = k0 + d_pp ** 0.5
+        k2 = k1 + d_pe ** 0.5
+        k3 = k2 + d_en ** 0.5
+
+        interval = k2 - k1
+        if interval < 1e-12:
+            # Degenerate — fall back to linear to avoid division by zero.
+            for j in range(1, num + 1):
+                t = j / (num + 1)
+                pts.append(QPointF(
+                    p_start.x() + t * dx,
+                    p_start.y() + t * dy,
+                ))
+                wids.append(w_start + t * (w_end - w_start))
+            pts.append(p_end)
+            wids.append(w_end)
+            return
+
+        # ---- Standard Catmull-Rom tangents ----
+        # Tangent at P_start: (P_end − Pᵢ₋₁) / (k2 − k0)
+        dx_s = (p_end.x() - p_prev.x()) / (k2 - k0)
+        dy_s = (p_end.y() - p_prev.y()) / (k2 - k0)
+
+        # Tangent at P_end:   (Pᵢ₊₁ − P_start) / (k3 − k1)
+        dx_e = (p_next.x() - p_start.x()) / (k3 - k1)
+        dy_e = (p_next.y() - p_start.y()) / (k3 - k1)
+
+        # ---- Evaluate cubic Hermite curve ----
+        for j in range(1, num + 1):
+            τ = j / (num + 1)
+            τ2 = τ * τ
+            τ3 = τ2 * τ
+
+            h00 = 2 * τ3 - 3 * τ2 + 1
+            h10 = τ3 - 2 * τ2 + τ
+            h01 = -2 * τ3 + 3 * τ2
+            h11 = τ3 - τ2
+
+            x = (h00 * p_start.x() + h10 * interval * dx_s
+                 + h01 * p_end.x() + h11 * interval * dx_e)
+            y = (h00 * p_start.y() + h10 * interval * dy_s
+                 + h01 * p_end.y() + h11 * interval * dy_e)
+
+            pts.append(QPointF(x, y))
+            wids.append(w_start + τ * (w_end - w_start))
+
+        # Restore the original endpoint.
+        pts.append(p_end)
+        wids.append(w_end)
+
+    # ------------------------------------------------------------------
+    # Velocity → width
+    # ------------------------------------------------------------------
+
     @staticmethod
     def _compute_point_width(
         base_width: float,
@@ -105,6 +267,10 @@ class StrokeManager(QObject):
             smoothed = raw_mult
 
         return base_width * smoothed
+
+    # ------------------------------------------------------------------
+    # Stroke lifecycle
+    # ------------------------------------------------------------------
 
     def end_stroke(self) -> Stroke | None:
         """Finalize the current stroke. Returns it, or None if too short."""

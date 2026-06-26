@@ -241,7 +241,9 @@ keyboard>=0.13      # 全局热键
     "highlighter_opacity_scale": 0.3,
     "highlighter_width_scale": 4.0,
     "interpolation_segments": 3,
-    "subdivision_pixel_gap": 4.0
+    "subdivision_pixel_gap": 8.0,
+    "max_point_gap": 8.0,
+    "max_densify_insert": 16
   }
 }
 ```
@@ -266,7 +268,9 @@ keyboard>=0.13      # 全局热键
 | `highlighter_opacity_scale` | `0.3` | 荧光笔额外透明度倍率 |
 | `highlighter_width_scale` | `4.0` | 荧光笔宽度倍率（在基础宽度上放大） |
 | `interpolation_segments` | `3` | Catmull-Rom 每对控制点之间的插值段数（越高曲线越平滑） |
-| `subdivision_pixel_gap` | `4.0` | **起笔细分密度**：当鼠标快速移动导致前两个采样点距离过大时，每多少像素插入一个子段（越小细分越密，起笔越平滑；过大则可能看到直线起始段） |
+| `subdivision_pixel_gap` | `8.0` | **回退细分密度**：渲染器在极端稀疏时的安全细分间距（正常情况下由 stroke_manager 插密接管） |
+| `max_point_gap` | `8.0` | **自适应插密阈值**：相邻原始采样点超过此距离时，自动用 Catmull-Rom 插入带曲率的中间点（越小插密越密，曲线越平滑；调大则保留更多原始稀疏采样） |
+| `max_densify_insert` | `16` | 单次插密最多插入的点数，防止极端稀疏数据导致点数爆炸 |
 
 ## 待实现功能（Phase 3 & 4）
 

@@ -60,6 +60,15 @@ class StrokeConfig:
     Only used during the transient phase before enough mouse events arrive for
     Catmull-Rom interpolation."""
 
+    max_point_gap: float = 8.0
+    """Max pixel distance between consecutive raw input points before automatic
+    densification inserts Catmull-Rom interpolated intermediate points.
+    Smaller values = denser point cloud = smoother curves (slightly more CPU)."""
+
+    max_densify_insert: int = 16
+    """Safety cap on the number of intermediate points inserted per densification
+    step (prevents explosion from extremely sparse input)."""
+
 
 # ---------------------------------------------------------------------------
 # JSON file management
@@ -100,6 +109,8 @@ def _write_defaults(path: str) -> None:
             "highlighter_width_scale": cfg.highlighter_width_scale,
             "interpolation_segments": cfg.interpolation_segments,
             "subdivision_pixel_gap": cfg.subdivision_pixel_gap,
+            "max_point_gap": cfg.max_point_gap,
+            "max_densify_insert": cfg.max_densify_insert,
         },
     }
     os.makedirs(os.path.dirname(path), exist_ok=True)
@@ -178,6 +189,14 @@ def load_stroke_config() -> StrokeConfig:
         pass
     try:
         cfg.subdivision_pixel_gap = float(rnd.get("subdivision_pixel_gap", cfg.subdivision_pixel_gap))
+    except (TypeError, ValueError):
+        pass
+    try:
+        cfg.max_point_gap = float(rnd.get("max_point_gap", cfg.max_point_gap))
+    except (TypeError, ValueError):
+        pass
+    try:
+        cfg.max_densify_insert = int(rnd.get("max_densify_insert", cfg.max_densify_insert))
     except (TypeError, ValueError):
         pass
 
