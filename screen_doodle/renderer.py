@@ -11,6 +11,9 @@ from PySide6.QtGui import (
 from .models import Stroke, ToolType
 from .rendering_config import cfg
 
+# Only these tools get velocity-sensitive variable-width rendering.
+_VELOCITY_TOOLS = {ToolType.PEN, ToolType.PEN2, ToolType.PEN3}
+
 
 def render_stroke(
     painter: QPainter,
@@ -111,8 +114,8 @@ def _draw_freehand(painter: QPainter, stroke: Stroke, is_preview: bool) -> None:
     n = len(stroke.points)
     pw = stroke.point_widths
 
-    # Use variable-width rendering when we have per-point data
-    if pw and len(pw) == n:
+    # Use variable-width rendering for velocity-sensitive tools
+    if pw and len(pw) == n and stroke.tool in _VELOCITY_TOOLS:
         _draw_variable_width(painter, stroke, is_preview)
         return
 
