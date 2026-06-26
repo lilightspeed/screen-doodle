@@ -100,10 +100,22 @@ def _draw_freehand(painter: QPainter, stroke: Stroke, is_preview: bool) -> None:
     appearance while ensuring the stroke exactly follows the mouse path —
     unlike quadratic Bézier midpoint interpolation, which truncates the last
     half-step and creates visible clipping at direction reversals.
+
+    When per-point velocity-based widths are available, dispatches to
+    ``_draw_variable_width`` for a natural speed-sensitive stroke.
     """
     if len(stroke.points) < 2:
         return
 
+    n = len(stroke.points)
+    pw = stroke.point_widths
+
+    # Use variable-width rendering when we have per-point data
+    if pw and len(pw) == n:
+        _draw_variable_width(painter, stroke, is_preview)
+        return
+
+    # ── Uniform-width path (original) ──────────────────────────────────
     if is_preview:
         _apply_preview(painter)
 
@@ -115,5 +127,40 @@ def _draw_freehand(painter: QPainter, stroke: Stroke, is_preview: bool) -> None:
     for pt in stroke.points[1:]:
         path.lineTo(pt)
     painter.drawPath(path)
+
+
+def _draw_variable_width(painter: QPainter, stroke: Stroke, is_preview: bool) -> None:
+    """Render a variable-width stroke as per-segment lines with alternating widths.
+
+    Each consecutive pair of points is drawn as an individual line whose
+    width is the average of the two endpoint widths.  ``RoundCap`` / ``RoundJoin``
+    make adjacent segments blend smoothly, while anti-aliasing eliminates
+    pixel-level jaggedness.  No circles or outline polygons = no fill-rule
+    complications or self-intersections.
+    """
+    if is_preview:
+        _apply_preview(painter)
+
+    color = QColor(stroke.color)
+    alpha = int(255 * stroke.opacity)
+    color.setAlpha(alpha)
+
+    points = stroke.points
+    widths = stroke.point_widths
+    n = len(points)
+
+    if n < 2:
+        return
+
+    painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+    painter.setBrush(Qt.NoBrush)
+
+    for i in range(n - 1):
+        seg_w = (widths[i] + widths[i + 1]) / 2.0
+        if seg_w < 0.5:
+            seg_w = 0.5
+        pen = QPen(color, seg_w, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin)
+        painter.setPen(pen)
+        painter.drawLine(points[i], points[i + 1])
 
 

@@ -1,9 +1,20 @@
 from __future__ import annotations
 
+import math
+
 from PySide6.QtCore import QObject, Signal
 from PySide6.QtCore import QPointF
 
 from .models import Stroke, ToolType
+
+# ── Velocity-to-width mapping constants ──────────────────────────────────
+# Only these tools get dynamic width based on drawing speed.
+_VELOCITY_TOOLS = {ToolType.PEN, ToolType.PEN2, ToolType.PEN3}
+
+_THIN_MULT = 0.4      # fastest drawing → 0.4× base width (thin)
+_THICK_MULT = 2.5     # slowest drawing → 2.5× base width (thick)
+_REF_DIST = 20.0      # pixel distance at which the curve is roughly halfway
+_ALPHA = 0.3          # exponential smoothing factor (lower = smoother)
 
 
 class StrokeManager(QObject):
@@ -34,12 +45,56 @@ class StrokeManager(QObject):
             opacity=opacity,
             tool=tool,
         )
+        # The first point has no predecessor for velocity calculation,
+        # so it gets the base width.
+        self._current.point_widths = [width]
         return self._current
 
     def add_point(self, point: QPointF) -> None:
-        """Append a point to the in-progress stroke."""
-        if self._current is not None:
-            self._current.points.append(point)
+        """Append a point to the in-progress stroke.
+
+        For velocity-sensitive tools (PEN / PEN2 / PEN3), the width of
+        the new point is derived from the distance to the previous point —
+        fast movement yields a thinner segment, slow movement a thicker one.
+        """
+        if self._current is None:
+            return
+
+        last = self._current.points[-1]
+        dist = math.hypot(point.x() - last.x(), point.y() - last.y())
+
+        tool = self._current.tool
+        if tool in _VELOCITY_TOOLS:
+            prev = self._current.point_widths[-1] if self._current.point_widths else None
+            w = self._compute_point_width(self._current.width, dist, prev)
+        else:
+            w = self._current.width
+
+        self._current.points.append(point)
+        self._current.point_widths.append(w)
+
+    @staticmethod
+    def _compute_point_width(
+        base_width: float,
+        distance: float,
+        prev_width: float | None,
+    ) -> float:
+        """Map pixel distance to a smoothed stroke width.
+
+        Small distance (slow) → wide, large distance (fast) → narrow.
+        Exponential smoothing prevents width jitter from mouse noise.
+        """
+        t = min(distance / _REF_DIST, 1.0)
+        # Inverted curve: t=0 → THICK_MULT, t=1 → THIN_MULT
+        raw_mult = _THICK_MULT - (_THICK_MULT - _THIN_MULT) * (t ** 0.7)
+
+        if prev_width is not None:
+            prev_mult = prev_width / base_width
+            smoothed = _ALPHA * raw_mult + (1 - _ALPHA) * prev_mult
+        else:
+            smoothed = raw_mult
+
+        return base_width * smoothed
 
     def end_stroke(self) -> Stroke | None:
         """Finalize the current stroke. Returns it, or None if too short."""

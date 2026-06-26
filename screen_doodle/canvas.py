@@ -131,7 +131,6 @@ class DrawingCanvas(QWidget):
         self._mouse_pos = event.position()  # always track for eraser preview
         if event.buttons() & Qt.LeftButton:
             self.stroke_manager.add_point(event.position())
-            self._cache_dirty = True
             self.update()
             event.accept()
         elif self.current_tool == ToolType.ERASER:
@@ -174,25 +173,41 @@ class DrawingCanvas(QWidget):
         else:
             painter.fillRect(self.rect(), QColor(0, 0, 0, 3))
 
-        # ── Layer 2: Strokes ─────────────────────────────────────────
-        # Render all strokes onto a temporary pixmap filled with
-        # Qt.transparent, then composite it over the background.  This way
-        # the eraser (CompositionMode_Clear) only erases the stroke layer,
-        # never the background — preserving alpha>0 for hit-testing.
-        temp = QPixmap(self.size())
-        temp.fill(Qt.transparent)
-        temp_painter = QPainter(temp)
-        temp_painter.setRenderHint(QPainter.Antialiasing)
+        # ── Layer 2: Cached completed strokes ────────────────────────
+        # Completed strokes are rendered once into a cache pixmap and
+        # reused across frames.  The cache is rebuilt only when strokes
+        # change (stroke-end / undo / redo / clear / resize), NOT on
+        # every mouse-move.  This keeps painting fast even with hundreds
+        # of strokes.
+        if (
+            self._cache_dirty
+            or self._cached_pixmap is None
+            or self._cached_pixmap.size() != self.size()
+        ):
+            self._cached_pixmap = QPixmap(self.size())
+            self._cached_pixmap.fill(Qt.transparent)
+            cp = QPainter(self._cached_pixmap)
+            cp.setRenderHint(QPainter.Antialiasing)
+            for stroke in self.stroke_manager.get_strokes():
+                render_stroke(cp, stroke, is_preview=False)
+            cp.end()
+            self._cache_dirty = False
 
-        for stroke in self.stroke_manager.get_strokes():
-            render_stroke(temp_painter, stroke, is_preview=False)
+        painter.drawPixmap(0, 0, self._cached_pixmap)
 
+        # ── Layer 3: Preview stroke (in-progress) ─────────────────────
+        # The preview must be rendered onto its own temp pixmap so that
+        # the eraser (CompositionMode_Clear) only erases the blank
+        # pixmap, never the background or cached strokes beneath.
         preview = self.stroke_manager.preview_stroke()
         if preview is not None:
-            render_stroke(temp_painter, preview, is_preview=True)
-
-        temp_painter.end()
-        painter.drawPixmap(0, 0, temp)
+            preview_pix = QPixmap(self.size())
+            preview_pix.fill(Qt.transparent)
+            pp = QPainter(preview_pix)
+            pp.setRenderHint(QPainter.Antialiasing)
+            render_stroke(pp, preview, is_preview=True)
+            pp.end()
+            painter.drawPixmap(0, 0, preview_pix)
 
         # ── Eraser cursor preview ────────────────────────────────────
         if self.current_tool == ToolType.ERASER and self._mouse_pos is not None:

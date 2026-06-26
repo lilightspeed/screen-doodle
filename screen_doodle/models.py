@@ -19,6 +19,7 @@ class ToolType(Enum):
 @dataclass
 class Stroke:
     points: list[QPointF] = field(default_factory=list)
+    point_widths: list[float] = field(default_factory=list)
     color: QColor = field(default_factory=lambda: QColor(255, 0, 0))
     width: float = 3.0
     opacity: float = 1.0
