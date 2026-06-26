@@ -14,7 +14,8 @@ _VELOCITY_TOOLS = {ToolType.PEN, ToolType.PEN2, ToolType.PEN3}
 _THIN_MULT = 0.4      # fastest drawing → 0.4× base width (thin)
 _THICK_MULT = 2.5     # slowest drawing → 2.5× base width (thick)
 _REF_DIST = 20.0      # pixel distance at which the curve is roughly halfway
-_ALPHA = 0.3          # exponential smoothing factor (lower = smoother)
+_ALPHA = 0.12         # exponential smoothing factor (lower = smoother, slower response)
+_SAMPLE_INTERVAL = 4  # recalculate width every N points (lower frequency = smoother)
 
 
 class StrokeManager(QObject):
@@ -27,6 +28,8 @@ class StrokeManager(QObject):
         self.strokes: list[Stroke] = []
         self.redo_stack: list[Stroke] = []
         self._current: Stroke | None = None
+        self._velocity_counter: int = 0
+        self._accumulated_dist: float = 0.0
 
     def start_stroke(
         self,
@@ -38,6 +41,8 @@ class StrokeManager(QObject):
     ) -> Stroke:
         """Begin a new stroke at the given point. Clears the redo stack."""
         self.redo_stack.clear()
+        self._velocity_counter = 0
+        self._accumulated_dist = 0.0
         self._current = Stroke(
             points=[point],
             color=color,
@@ -53,9 +58,11 @@ class StrokeManager(QObject):
     def add_point(self, point: QPointF) -> None:
         """Append a point to the in-progress stroke.
 
-        For velocity-sensitive tools (PEN / PEN2 / PEN3), the width of
-        the new point is derived from the distance to the previous point —
-        fast movement yields a thinner segment, slow movement a thicker one.
+        For velocity-sensitive tools (PEN / PEN2 / PEN3), the width is
+        recalculated only every ``_SAMPLE_INTERVAL`` points using the
+        *average* distance over that window.  Between recalculations the
+        last computed width is reused, which reduces jitter and makes the
+        stroke feel more stable.
         """
         if self._current is None:
             return
@@ -65,8 +72,17 @@ class StrokeManager(QObject):
 
         tool = self._current.tool
         if tool in _VELOCITY_TOOLS:
-            prev = self._current.point_widths[-1] if self._current.point_widths else None
-            w = self._compute_point_width(self._current.width, dist, prev)
+            self._accumulated_dist += dist
+            self._velocity_counter += 1
+
+            if self._velocity_counter >= _SAMPLE_INTERVAL:
+                avg_dist = self._accumulated_dist / _SAMPLE_INTERVAL
+                prev = self._current.point_widths[-1] if self._current.point_widths else None
+                w = self._compute_point_width(self._current.width, avg_dist, prev)
+                self._velocity_counter = 0
+                self._accumulated_dist = 0.0
+            else:
+                w = self._current.point_widths[-1] if self._current.point_widths else self._current.width
         else:
             w = self._current.width
 
