@@ -249,7 +249,7 @@ class ToolBarWindow(QWidget):
                 border: 1px solid transparent;
                 border-radius: 4px;
                 padding: 4px 6px;
-                font-size: 15px;
+                font-size: 20px;
                 min-width: 28px;
                 min-height: 28px;
             }
@@ -424,7 +424,7 @@ class ToolBarWindow(QWidget):
         self._clear_btn.setText("\U0001f5d1")
         self._clear_btn.setToolTip("Clear all")
         for btn in (self._undo_btn, self._redo_btn, self._clear_btn):
-            btn.setStyleSheet(btn.styleSheet() + "QToolButton { font-size: 13px; }")
+            btn.setStyleSheet(btn.styleSheet() + "QToolButton { font-size: 20px; }")
         main_layout.addWidget(self._undo_btn)
         main_layout.addWidget(self._redo_btn)
         main_layout.addWidget(self._clear_btn)
@@ -435,7 +435,7 @@ class ToolBarWindow(QWidget):
         self._hide_btn.setFixedSize(22, 22)
         self._hide_btn.setToolTip("Hide (Esc)")
         self._hide_btn.setStyleSheet(
-            "QPushButton { color: #666; font-size: 14px; "
+            "QPushButton { color: #666; font-size: 20px; "
             "background: transparent; border: none; border-radius: 4px; }"
             "QPushButton:hover { color: #1565C0; background: #C8E0F8; }"
         )
