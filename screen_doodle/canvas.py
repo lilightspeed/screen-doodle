@@ -13,6 +13,7 @@ from PySide6.QtWidgets import QWidget
 
 from .models import Stroke, ToolType
 from .renderer import render_stroke
+from .rendering_config import cfg
 from .stroke_manager import StrokeManager
 
 
@@ -196,18 +197,22 @@ class DrawingCanvas(QWidget):
         painter.drawPixmap(0, 0, self._cached_pixmap)
 
         # ── Layer 3: Preview stroke (in-progress) ─────────────────────
-        # The preview must be rendered onto its own temp pixmap so that
-        # the eraser (CompositionMode_Clear) only erases the blank
-        # pixmap, never the background or cached strokes beneath.
+        # The preview is rendered with FULL opacity onto a temp pixmap,
+        # then composited at reduced opacity.  This avoids visible
+        # "dots" at segment joints caused by overlapping semi-transparent
+        # round caps accumulating opacity where they overlap.
         preview = self.stroke_manager.preview_stroke()
         if preview is not None:
             preview_pix = QPixmap(self.size())
             preview_pix.fill(Qt.transparent)
             pp = QPainter(preview_pix)
             pp.setRenderHint(QPainter.Antialiasing)
-            render_stroke(pp, preview, is_preview=True)
+            render_stroke(pp, preview, is_preview=False)
             pp.end()
+            painter.save()
+            painter.setOpacity(cfg.preview_opacity)
             painter.drawPixmap(0, 0, preview_pix)
+            painter.restore()
 
         # ── Eraser cursor preview ────────────────────────────────────
         if self.current_tool == ToolType.ERASER and self._mouse_pos is not None:
