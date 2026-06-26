@@ -51,6 +51,9 @@ class StrokeConfig:
     highlighter_width_scale: float = 4.0
     """Width multiplier for the highlighter tool (applied on top of base width)."""
 
+    interpolation_segments: int = 8
+    """Catmull-Rom sub‑segments per control‑point pair (higher = smoother curve)."""
+
 
 # ---------------------------------------------------------------------------
 # JSON file management
@@ -89,6 +92,7 @@ def _write_defaults(path: str) -> None:
             "preview_opacity": cfg.preview_opacity,
             "highlighter_opacity_scale": cfg.highlighter_opacity_scale,
             "highlighter_width_scale": cfg.highlighter_width_scale,
+            "interpolation_segments": cfg.interpolation_segments,
         },
     }
     os.makedirs(os.path.dirname(path), exist_ok=True)
@@ -159,6 +163,10 @@ def load_stroke_config() -> StrokeConfig:
         pass
     try:
         cfg.highlighter_width_scale = float(rnd.get("highlighter_width_scale", cfg.highlighter_width_scale))
+    except (TypeError, ValueError):
+        pass
+    try:
+        cfg.interpolation_segments = int(rnd.get("interpolation_segments", cfg.interpolation_segments))
     except (TypeError, ValueError):
         pass
 
