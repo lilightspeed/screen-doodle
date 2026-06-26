@@ -33,18 +33,10 @@ class StrokeManager(QObject):
         opacity: float,
         tool: ToolType,
     ) -> Stroke:
-        """Begin a new stroke at the given point. Clears the redo stack.
-
-        The first real mouse-move event (via ``add_point``) will *absorb* this
-        starting point — replacing it rather than appending — so the
-        press-position → first-move segment (a long straight line when drawing
-        fast) is never created.  The stroke visibly starts at the first
-        movement position.
-        """
+        """Begin a new stroke at the given point.  Clears the redo stack."""
         self.redo_stack.clear()
         self._velocity_counter = 0
         self._accumulated_dist = 0.0
-        self._absorb_first_point = True
         self._current = Stroke(
             points=[point],
             color=color,
@@ -60,12 +52,6 @@ class StrokeManager(QObject):
     def add_point(self, point: QPointF) -> None:
         """Append a point to the in-progress stroke.
 
-        **First-point absorption**
-        The very first call after ``start_stroke`` *replaces* the press
-        position instead of appending — this eliminates the long straight
-        line that appears when the mouse has already moved a significant
-        distance by the time the first ``mouseMoveEvent`` fires.
-
         For velocity-sensitive tools (PEN / PEN2 / PEN3), the width is
         recalculated only every ``_SAMPLE_INTERVAL`` points using the
         *average* distance over that window.  Between recalculations the
@@ -78,16 +64,6 @@ class StrokeManager(QObject):
         so the renderer always has dense geometry for smooth curves.
         """
         if self._current is None:
-            return
-
-        # ── Absorb the first real move into the press-position ──────────
-        # This discards the press→first-move "straight line" artifact and
-        # makes the stroke visibly start at the first movement position.
-        if self._absorb_first_point:
-            self._current.points[0] = point
-            # Width stays at base_width (set in start_stroke) — there is no
-            # predecessor distance to compute a velocity yet.
-            self._absorb_first_point = False
             return
 
         last = self._current.points[-1]
@@ -285,7 +261,6 @@ class StrokeManager(QObject):
         finalized = self._current
         self.strokes.append(finalized)
         self._current = None
-        self.data_changed.emit()
         return finalized
 
     def undo(self) -> bool:

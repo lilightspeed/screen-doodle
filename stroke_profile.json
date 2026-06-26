@@ -1,8 +1,8 @@
 {
   "_comment": "Stroke tuning profile.\nEdit any value and restart the app to apply.\nDelete this file to regenerate defaults.",
   "velocity": {
-    "sample_interval": 4,
-    "smoothing_alpha": 0.35,
+    "sample_interval": 10,
+    "smoothing_alpha": 0.40,
     "thin_mult": 0.4,
     "thick_mult": 2.5,
     "ref_dist": 10.0,
@@ -13,7 +13,7 @@
     "preview_opacity": 1.0,
     "highlighter_opacity_scale": 0.3,
     "highlighter_width_scale": 4.0,
-    "interpolation_segments": 3,
+    "interpolation_segments": 2,
     "subdivision_pixel_gap": 8.0,
     "max_point_gap": 8.0,
     "max_densify_insert": 16
