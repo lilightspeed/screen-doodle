@@ -174,12 +174,23 @@ class DrawingCanvas(QWidget):
         else:
             painter.fillRect(self.rect(), QColor(0, 0, 0, 3))
 
+        # Check if there is an active eraser preview — if so, Layer 2
+        # must be skipped so the cached strokes are not drawn twice
+        # (once here and once inside the eraser preview pixmap).
+        preview = self.stroke_manager.preview_stroke()
+        is_erasing = preview is not None and preview.tool == ToolType.ERASER
+
         # ── Layer 2: Cached completed strokes ────────────────────────
         # Completed strokes are rendered once into a cache pixmap and
         # reused across frames.  The cache is rebuilt only when strokes
         # change (stroke-end / undo / redo / clear / resize), NOT on
         # every mouse-move.  This keeps painting fast even with hundreds
         # of strokes.
+        #
+        # NOTE: When *is_erasing* is true this layer is skipped entirely;
+        # the cached strokes are only shown via the eraser preview in
+        # Layer 3 below, preventing the double-draw that made highlighters
+        # appear abnormally bright and the eraser effect invisible.
         if (
             self._cache_dirty
             or self._cached_pixmap is None
@@ -194,25 +205,44 @@ class DrawingCanvas(QWidget):
             cp.end()
             self._cache_dirty = False
 
-        painter.drawPixmap(0, 0, self._cached_pixmap)
+        if not is_erasing:
+            painter.drawPixmap(0, 0, self._cached_pixmap)
 
         # ── Layer 3: Preview stroke (in-progress) ─────────────────────
-        # The preview is rendered with FULL opacity onto a temp pixmap,
-        # then composited at reduced opacity.  This avoids visible
-        # "dots" at segment joints caused by overlapping semi-transparent
-        # round caps accumulating opacity where they overlap.
-        preview = self.stroke_manager.preview_stroke()
+        # When the user is actively drawing (preview is not None) we
+        # render onto a temp pixmap first, then composite it onto the
+        # main canvas.  This approach avoids visible "dots" at segment
+        # joints that would otherwise appear from overlapping semi-
+        # transparent round caps accumulating opacity.
+        #
+        # Eraser preview (is_erasing == True):
+        #   Layer 2 is skipped — the cached completed strokes are only
+        #   shown here, copied onto the temp pixmap with the eraser
+        #   applied on top.  The result is drawn at FULL opacity so
+        #   the user sees the actual erased state in real-time.
+        #
+        # All other tools:
+        #   The preview is drawn at full opacity onto the temp pixmap,
+        #   then composited at *cfg.preview_opacity* — a dimmed preview
+        #   that avoids the "joint dots" artifact.
         if preview is not None:
             preview_pix = QPixmap(self.size())
             preview_pix.fill(Qt.transparent)
             pp = QPainter(preview_pix)
             pp.setRenderHint(QPainter.Antialiasing)
-            render_stroke(pp, preview, is_preview=False)
-            pp.end()
-            painter.save()
-            painter.setOpacity(cfg.preview_opacity)
-            painter.drawPixmap(0, 0, preview_pix)
-            painter.restore()
+
+            if is_erasing:
+                pp.drawPixmap(0, 0, self._cached_pixmap)
+                render_stroke(pp, preview, is_preview=False)
+                pp.end()
+                painter.drawPixmap(0, 0, preview_pix)
+            else:
+                render_stroke(pp, preview, is_preview=False)
+                pp.end()
+                painter.save()
+                painter.setOpacity(cfg.preview_opacity)
+                painter.drawPixmap(0, 0, preview_pix)
+                painter.restore()
 
         # ── Eraser cursor preview ────────────────────────────────────
         if self.current_tool == ToolType.ERASER and self._mouse_pos is not None:
