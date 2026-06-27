@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 from dataclasses import dataclass
 
 
@@ -87,11 +88,17 @@ _CONFIG_FILE = "setting.json"
 
 
 def _resolve_config_path() -> str:
-    """Return ``<project-root>/setting.json``."""
-    return os.path.join(
-        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-        _CONFIG_FILE,
-    )
+    """Return path to ``setting.json``.
+
+    When running as a PyInstaller‑frozen executable the file lives next to
+    the .exe so users can edit it easily.  In development mode it sits at
+    the project root (two directories above this module).
+    """
+    if getattr(sys, "frozen", False):
+        base = os.path.dirname(sys.executable)
+    else:
+        base = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    return os.path.join(base, _CONFIG_FILE)
 
 
 def _write_defaults(path: str) -> None:
