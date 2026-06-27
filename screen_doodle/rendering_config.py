@@ -42,6 +42,11 @@ class StrokeConfig:
     min_segment_width: float = 0.5
     """Clamp per-segment width to at least this value (avoids zero-width artifacts)."""
 
+    aa_quality: int = 2
+    """Supersampling factor (SSAA).  1 = Qt built‑in AA only,
+    2 = 2× SSAA (4× pixels, high quality),  3 = 3× (9× pixels).
+    Higher values use proportionally more memory."""
+
     preview_antialias: bool = False
     """Whether to enable antialiasing on the in-progress preview.
     When False (default), the preview shows visible stair‑step edges,
@@ -109,6 +114,7 @@ def _write_defaults(path: str) -> None:
         },
         "rendering": {
             "min_segment_width": cfg.min_segment_width,
+            "aa_quality": cfg.aa_quality,
             "preview_antialias": cfg.preview_antialias,
             "preview_opacity": cfg.preview_opacity,
             "highlighter_opacity_scale": cfg.highlighter_opacity_scale,
@@ -173,6 +179,10 @@ def load_stroke_config() -> StrokeConfig:
 
     # --- rendering section ---
     rnd = data.get("rendering", {})
+    try:
+        cfg.aa_quality = int(rnd.get("aa_quality", cfg.aa_quality))
+    except (TypeError, ValueError):
+        pass
     try:
         cfg.preview_antialias = bool(rnd.get("preview_antialias", cfg.preview_antialias))
     except (TypeError, ValueError):

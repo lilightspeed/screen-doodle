@@ -2,21 +2,22 @@
   "_comment": "Stroke tuning profile.\nEdit any value and restart the app to apply.\nDelete this file to regenerate defaults.",
   "velocity": {
     "sample_interval": 4,
-    "smoothing_alpha": 0.12,
+    "smoothing_alpha": 0.35,
     "thin_mult": 0.4,
     "thick_mult": 2.5,
-    "ref_dist": 20.0,
-    "power_exponent": 0.7
+    "ref_dist": 15.0,
+    "power_exponent": 1.5
   },
   "rendering": {
-    "min_segment_width": 0.5,
+    "min_segment_width": 0.1,
+    "aa_quality": 2,
     "preview_antialias": true,
-    "preview_opacity": 0.7,
-    "highlighter_opacity_scale": 0.3,
+    "preview_opacity": 1,
+    "highlighter_opacity_scale": 0.23,
     "highlighter_width_scale": 4.0,
-    "interpolation_segments": 12,
-    "subdivision_pixel_gap": 3.0,
+    "interpolation_segments": 2,
+    "subdivision_pixel_gap": 4.0,
     "max_point_gap": 3.0,
-    "max_densify_insert": 24
+    "max_densify_insert": 16
   }
 }

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from PySide6.QtCore import Qt, QPointF
+from PySide6.QtCore import Qt, QPointF, QSize
 from PySide6.QtGui import (
     QColor,
     QMouseEvent,
@@ -211,14 +211,18 @@ class DrawingCanvas(QWidget):
         # the cached strokes are only shown via the eraser preview in
         # Layer 3 below, preventing the double-draw that made highlighters
         # appear abnormally bright and the eraser effect invisible.
+        ss = cfg.aa_quality
+        ss_cache = QSize(self.width() * ss, self.height() * ss)
         if (
             self._cache_dirty
             or self._cached_pixmap is None
-            or self._cached_pixmap.size() != self.size()
+            or self._cached_pixmap.size() != ss_cache
         ):
-            self._cached_pixmap = QPixmap(self.size())
+            self._cached_pixmap = QPixmap(ss_cache)
             self._cached_pixmap.fill(Qt.transparent)
             cp = QPainter(self._cached_pixmap)
+            if ss > 1:
+                cp.scale(ss, ss)
             cp.setRenderHint(QPainter.Antialiasing)
             for stroke in self.stroke_manager.get_strokes():
                 render_stroke(cp, stroke, is_preview=False)
@@ -226,7 +230,9 @@ class DrawingCanvas(QWidget):
             self._cache_dirty = False
 
         if not is_erasing:
-            painter.drawPixmap(0, 0, self._cached_pixmap)
+            painter.drawPixmap(
+                self.rect(), self._cached_pixmap, self._cached_pixmap.rect(),
+            )
 
         # ── Layer 3: Preview stroke (in-progress) ─────────────────────
         # Instead of re-rendering the entire current stroke from scratch
@@ -245,11 +251,15 @@ class DrawingCanvas(QWidget):
         #   The preview is composited at *cfg.preview_opacity*.
         if preview is not None and self._preview_pix is not None:
             if is_erasing:
-                painter.drawPixmap(0, 0, self._preview_pix)
+                painter.drawPixmap(
+                    self.rect(), self._preview_pix, self._preview_pix.rect(),
+                )
             elif self._preview_rendered_count > 0:
                 painter.save()
                 painter.setOpacity(cfg.preview_opacity)
-                painter.drawPixmap(0, 0, self._preview_pix)
+                painter.drawPixmap(
+                    self.rect(), self._preview_pix, self._preview_pix.rect(),
+                )
                 painter.restore()
 
         # ── Eraser cursor preview ────────────────────────────────────
@@ -274,9 +284,10 @@ class DrawingCanvas(QWidget):
 
     def _init_eraser_preview(self) -> None:
         """Seed the preview pixmap with cached strokes for eraser compositing."""
+        ss_prev = QSize(self.width() * cfg.aa_quality, self.height() * cfg.aa_quality)
         if (self._preview_pix is None
-                or self._preview_pix.size() != self.size()):
-            self._preview_pix = QPixmap(self.size())
+                or self._preview_pix.size() != ss_prev):
+            self._preview_pix = QPixmap(ss_prev)
         self._preview_pix.fill(Qt.transparent)
         if self._cached_pixmap is not None:
             pp = QPainter(self._preview_pix)
@@ -309,17 +320,18 @@ class DrawingCanvas(QWidget):
         start = max(0, self._preview_rendered_count - 1)
 
         # Ensure the preview pixmap exists and is the right size.
+        ss = cfg.aa_quality
+        ss_prev = QSize(self.width() * ss, self.height() * ss)
         if (self._preview_pix is None
-                or self._preview_pix.size() != self.size()):
-            self._preview_pix = QPixmap(self.size())
+                or self._preview_pix.size() != ss_prev):
+            self._preview_pix = QPixmap(ss_prev)
             self._preview_pix.fill(Qt.transparent)
 
         pp = QPainter(self._preview_pix)
+        if ss > 1:
+            pp.scale(ss, ss)
         if cfg.preview_antialias:
             pp.setRenderHint(QPainter.Antialiasing)
-        # Intentionally no Antialiasing here — the user sees stair‑step
-        # edges while drawing, and the antialiased final render (CR 12)
-        # produces a clear quality jump on release.
         pp.setBrush(Qt.NoBrush)
 
         if preview.tool == ToolType.ERASER:
@@ -384,12 +396,16 @@ class DrawingCanvas(QWidget):
         if preview is None:
             return
 
+        ss = cfg.aa_quality
+        ss_cache = QSize(self.width() * ss, self.height() * ss)
         if (self._cached_pixmap is None
-                or self._cached_pixmap.size() != self.size()):
-            self._cached_pixmap = QPixmap(self.size())
+                or self._cached_pixmap.size() != ss_cache):
+            self._cached_pixmap = QPixmap(ss_cache)
             self._cached_pixmap.fill(Qt.transparent)
 
         cp = QPainter(self._cached_pixmap)
+        if ss > 1:
+            cp.scale(ss, ss)
         cp.setRenderHint(QPainter.Antialiasing)
         render_stroke(cp, preview, is_preview=False)
         cp.end()
