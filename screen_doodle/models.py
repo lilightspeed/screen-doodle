@@ -14,6 +14,7 @@ class ToolType(Enum):
     ERASER = auto()
     PEN2 = auto()
     PEN3 = auto()
+    SELECT = auto()
 
 
 @dataclass

@@ -1,10 +1,11 @@
 from __future__ import annotations
 
-from PySide6.QtCore import Qt, QPointF, QSize
+from PySide6.QtCore import Qt, QPointF, QSize, QRectF
 from PySide6.QtGui import (
     QColor,
     QMouseEvent,
     QPainter,
+    QPainterPath,
     QPen,
     QPixmap,
     QResizeEvent,
@@ -45,6 +46,22 @@ class DrawingCanvas(QWidget):
         self._preview_pix: QPixmap | None = None
         self._preview_rendered_count: int = 0
 
+        # --- selection / move state ---
+        self._selection_active: bool = False
+        self._selection_polygon: list[QPointF] = []
+        self._selected_stroke_indices: set[int] = set()
+        self._selected_point_indices: dict[int, set[int]] = {}
+        self._lasso_points: list[QPointF] = []
+
+        # Point-based drag state: directly translate selected points
+        self._is_dragging_selection: bool = False
+        self._drag_start_pos: QPointF | None = None
+
+        # Move undo/redo stacks
+        # Each entry: {'indices': {stroke_idx: {point_idx, ...}}, 'delta': QPointF}
+        self._move_undo_stack: list[dict] = []
+        self._move_redo_stack: list[dict] = []
+
         # Rebuild cache when strokes change
         self.stroke_manager.data_changed.connect(self._invalidate_cache)
 
@@ -57,9 +74,23 @@ class DrawingCanvas(QWidget):
     # ------------------------------------------------------------------
 
     def set_tool(self, tool: ToolType) -> None:
+        # Clear selection if switching away from SELECT tool
+        if self.current_tool == ToolType.SELECT and tool != ToolType.SELECT:
+            saved_select_active = self._selection_active
+            self._clear_selection()
+            if saved_select_active:
+                self._invalidate_cache()
+
         self.current_tool = tool
         if tool == ToolType.MOUSE:
             self.setCursor(Qt.ArrowCursor)
+        elif tool == ToolType.SELECT:
+            if self._selection_active:
+                self.setCursor(Qt.SizeAllCursor if self._point_in_polygon(
+                    self._mouse_pos or QPointF(0, 0), self._selection_polygon
+                ) else Qt.CrossCursor)
+            else:
+                self.setCursor(Qt.CrossCursor)
         else:
             self.setCursor(Qt.CrossCursor)
 
@@ -95,16 +126,35 @@ class DrawingCanvas(QWidget):
         self.releaseMouse()
 
     def undo(self) -> None:
+        if self._move_undo_stack:
+            data = self._move_undo_stack.pop()
+            self._move_redo_stack.append(data)
+            self._apply_delta(data['indices'], -data['delta'])
+            self._clear_selection()
+            self._invalidate_cache()
+            self.update()
+            return
         self.stroke_manager.undo()
         self._reset_preview_state()
         self.update()
 
     def redo(self) -> None:
+        if self._move_redo_stack:
+            data = self._move_redo_stack.pop()
+            self._move_undo_stack.append(data)
+            self._apply_delta(data['indices'], data['delta'])
+            self._clear_selection()
+            self._invalidate_cache()
+            self.update()
+            return
         self.stroke_manager.redo()
         self._reset_preview_state()
         self.update()
 
     def clear_all(self) -> None:
+        self._clear_selection()
+        self._move_undo_stack.clear()
+        self._move_redo_stack.clear()
         self.stroke_manager.clear()
         self._reset_preview_state()
         self.update()
@@ -124,6 +174,23 @@ class DrawingCanvas(QWidget):
 
     def mousePressEvent(self, event: QMouseEvent) -> None:
         if event.button() == Qt.LeftButton:
+            if self.current_tool == ToolType.SELECT:
+                if self._selection_active:
+                    if self._point_in_polygon(event.position(), self._selection_polygon):
+                        # Start drag — translate points directly
+                        self._start_move_drag(event.position())
+                    else:
+                        # Click outside — clear selection
+                        self._clear_selection()
+                else:
+                    # No active selection — start lasso
+                    self.grabMouse()
+                    self._lasso_points = [event.position()]
+                    self._mouse_pos = event.position()
+                self.update()
+                event.accept()
+                return
+
             self.grabMouse()  # capture all mouse events during drag
             pos = event.position()
             width = self._eraser_width if self.current_tool == ToolType.ERASER else self.current_width
@@ -141,6 +208,28 @@ class DrawingCanvas(QWidget):
             event.accept()
 
     def mouseMoveEvent(self, event: QMouseEvent) -> None:
+        if self.current_tool == ToolType.SELECT:
+            if self._is_dragging_selection:
+                # Translate selected points by frame-to-frame delta
+                delta = event.position() - self._mouse_pos
+                self._translate_selection(delta)
+                self._mouse_pos = event.position()
+                self._invalidate_cache()
+                event.accept()
+                return
+            elif event.buttons() & Qt.LeftButton and self._lasso_points:
+                self._lasso_points.append(event.position())
+                self.update()
+                event.accept()
+                return
+            elif self._selection_active:
+                # Update cursor when hovering over selection
+                if self._point_in_polygon(event.position(), self._selection_polygon):
+                    self.setCursor(Qt.SizeAllCursor)
+                else:
+                    self.setCursor(Qt.CrossCursor)
+                event.accept()
+
         self._mouse_pos = event.position()  # always track for eraser preview
         if event.buttons() & Qt.LeftButton:
             self.stroke_manager.add_point(event.position())
@@ -154,6 +243,17 @@ class DrawingCanvas(QWidget):
 
     def mouseReleaseEvent(self, event: QMouseEvent) -> None:
         if event.button() == Qt.LeftButton:
+            if self.current_tool == ToolType.SELECT:
+                if self._is_dragging_selection:
+                    self.releaseMouse()
+                    self._commit_move()
+                    self.update()
+                elif self._lasso_points:
+                    self.releaseMouse()
+                    self._close_lasso()
+                event.accept()
+                return
+
             self.releaseMouse()  # release mouse capture
             # Finalize the preview into the cache (incremental — single stroke)
             preview = self.stroke_manager.preview_stroke()
@@ -201,16 +301,6 @@ class DrawingCanvas(QWidget):
         is_erasing = preview is not None and preview.tool == ToolType.ERASER
 
         # ── Layer 2: Cached completed strokes ────────────────────────
-        # Completed strokes are rendered once into a cache pixmap and
-        # reused across frames.  The cache is rebuilt only when strokes
-        # change (stroke-end / undo / redo / clear / resize), NOT on
-        # every mouse-move.  This keeps painting fast even with hundreds
-        # of strokes.
-        #
-        # NOTE: When *is_erasing* is true this layer is skipped entirely;
-        # the cached strokes are only shown via the eraser preview in
-        # Layer 3 below, preventing the double-draw that made highlighters
-        # appear abnormally bright and the eraser effect invisible.
         ss = cfg.aa_quality
         ss_cache = QSize(self.width() * ss, self.height() * ss)
         if (
@@ -220,13 +310,17 @@ class DrawingCanvas(QWidget):
         ):
             self._cached_pixmap = QPixmap(ss_cache)
             self._cached_pixmap.fill(Qt.transparent)
+
             cp = QPainter(self._cached_pixmap)
             if ss > 1:
                 cp.scale(ss, ss)
             cp.setRenderHint(QPainter.Antialiasing)
+
             for stroke in self.stroke_manager.get_strokes():
                 render_stroke(cp, stroke, is_preview=False)
+
             cp.end()
+
             self._cache_dirty = False
 
         if not is_erasing:
@@ -270,10 +364,42 @@ class DrawingCanvas(QWidget):
             r = self._eraser_width / 2.0
             painter.drawEllipse(self._mouse_pos, r, r)
 
+        # ── Selection visuals ────────────────────────────────────────
+
+        # Live lasso preview while drawing
+        if self.current_tool == ToolType.SELECT and self._lasso_points:
+            pen = QPen(QColor(100, 100, 220, 180), 1.5, Qt.DashLine)
+            painter.setPen(pen)
+            painter.setBrush(Qt.NoBrush)
+            path = QPainterPath()
+            path.moveTo(self._lasso_points[0])
+            for pt in self._lasso_points[1:]:
+                path.lineTo(pt)
+            painter.drawPath(path)
+
+        # Active selection border + subtle fill
+        if self._selection_active and self._selection_polygon:
+            spath = QPainterPath()
+            spath.moveTo(self._selection_polygon[0])
+            for pt in self._selection_polygon[1:]:
+                spath.lineTo(pt)
+            spath.closeSubpath()
+
+            # Subtle fill (very light blue, semi-transparent)
+            painter.setBrush(QColor(100, 150, 255, 20))
+            painter.setPen(Qt.NoPen)
+            painter.drawPath(spath)
+
+            # Dashed gray border
+            pen = QPen(QColor(160, 160, 160, 200), 1.5, Qt.DashLine)
+            painter.setPen(pen)
+            painter.setBrush(Qt.NoBrush)
+            painter.drawPath(spath)
+
         painter.end()
 
     # ------------------------------------------------------------------
-    # Incremental preview rendering (Fix 2/4)
+    # Incremental preview rendering
     # ------------------------------------------------------------------
 
     def _reset_preview_state(self) -> None:
@@ -422,4 +548,136 @@ class DrawingCanvas(QWidget):
         super().resizeEvent(event)
         self._cached_bg = None
         self._preview_pix = None
+        self._is_dragging_selection = False
         self._invalidate_cache()
+
+    # ------------------------------------------------------------------
+    # Selection helpers
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _point_in_polygon(point: QPointF, polygon: list[QPointF]) -> bool:
+        """Ray casting algorithm: returns True if *point* is inside *polygon*."""
+        inside = False
+        j = len(polygon) - 1
+        for i in range(len(polygon)):
+            if (
+                (polygon[i].y() > point.y()) != (polygon[j].y() > point.y())
+            ) and (
+                point.x()
+                < (polygon[j].x() - polygon[i].x())
+                * (point.y() - polygon[i].y())
+                / (polygon[j].y() - polygon[i].y())
+                + polygon[i].x()
+            ):
+                inside = not inside
+            j = i
+        return inside
+
+    def _close_lasso(self) -> None:
+        """Close the lasso into a polygon and find enclosed strokes."""
+        if len(self._lasso_points) < 3:
+            self._lasso_points.clear()
+            return
+
+        self._selection_polygon = list(self._lasso_points)
+        self._lasso_points.clear()
+
+        # Find strokes with any point inside the polygon, AND record
+        # exactly which points are inside (for partial-stroke moves).
+        strokes = self.stroke_manager.strokes
+        self._selected_stroke_indices.clear()
+        self._selected_point_indices.clear()
+        for idx, stroke in enumerate(strokes):
+            inside: set[int] = set()
+            for i, pt in enumerate(stroke.points):
+                if self._point_in_polygon(pt, self._selection_polygon):
+                    inside.add(i)
+            if inside:
+                self._selected_stroke_indices.add(idx)
+                self._selected_point_indices[idx] = inside
+
+        if not self._selected_stroke_indices:
+            self._selection_active = False
+            self._selection_polygon.clear()
+            self.update()
+            return
+
+        self._selection_active = True
+        self.update()
+
+    def _clear_selection(self) -> None:
+        """Clear the current selection and drag state."""
+        self._selection_active = False
+        self._selection_polygon.clear()
+        self._selected_stroke_indices.clear()
+        self._selected_point_indices.clear()
+        self._lasso_points.clear()
+        self._is_dragging_selection = False
+        self._drag_start_pos = None
+        self.update()
+
+    # ------------------------------------------------------------------
+    # Point-based selection move
+    # ------------------------------------------------------------------
+
+    def _start_move_drag(self, pos: QPointF) -> None:
+        """Begin dragging — selected stroke points will follow the mouse."""
+        self._is_dragging_selection = True
+        self._drag_start_pos = QPointF(pos.x(), pos.y())
+        self._mouse_pos = QPointF(pos.x(), pos.y())
+        self.grabMouse()
+        self.update()
+
+    def _translate_selection(self, delta: QPointF) -> None:
+        """Translate ALL points of every selected stroke by *delta*.
+
+        The entire stroke moves as a unit — no partial translation, so
+        there is no "藕断丝连" (stroke-splitting) effect.
+        The selection polygon follows the cursor as a whole.
+        """
+        strokes = self.stroke_manager.strokes
+        for idx in self._selected_stroke_indices:
+            if idx >= len(strokes):
+                continue
+            stroke = strokes[idx]
+            for i in range(len(stroke.points)):
+                stroke.points[i] += delta
+
+        # Move the selection polygon along with the content
+        for i in range(len(self._selection_polygon)):
+            self._selection_polygon[i] += delta
+
+    def _commit_move(self) -> None:
+        """Finalize the move: save undo state, clean up drag state."""
+        total_delta = self._mouse_pos - self._drag_start_pos
+        if total_delta.manhattanLength() < 1:
+            # No meaningful move
+            self._is_dragging_selection = False
+            self._drag_start_pos = None
+            return
+
+        # Save undo state (a reversed delta restores original positions)
+        # Store selected stroke indices so undo can reverse the move for
+        # every point of those strokes.
+        data = {
+            'indices': set(self._selected_stroke_indices),
+            'delta': QPointF(total_delta.x(), total_delta.y()),
+        }
+        self._move_undo_stack.append(data)
+        self._move_redo_stack.clear()
+
+        # Clean up drag state (keep selection active for subsequent drags)
+        self._is_dragging_selection = False
+        self._drag_start_pos = None
+        self._invalidate_cache()
+
+    def _apply_delta(self, indices: set[int], delta: QPointF) -> None:
+        """Apply *delta* to ALL points of the indexed strokes (for undo/redo)."""
+        strokes = self.stroke_manager.strokes
+        for idx in indices:
+            if idx >= len(strokes):
+                continue
+            stroke = strokes[idx]
+            for i in range(len(stroke.points)):
+                stroke.points[i] += delta

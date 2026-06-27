@@ -188,6 +188,7 @@ class ToolBarWindow(QWidget):
         ("✏️", ToolType.PEN),
         ("\U0001f58a️", ToolType.PEN2),   # 🖊️
         ("✒️", ToolType.PEN3),
+        ("🔲", ToolType.SELECT),
         ("\U0001f58d️", ToolType.HIGHLIGHTER),
         ("\U0001f9f9", ToolType.ERASER),
     ]
@@ -238,7 +239,7 @@ class ToolBarWindow(QWidget):
         screen = QApplication.primaryScreen()
         if screen:
             sg = screen.availableGeometry()
-            tw, th = 520, 66
+            tw, th = 570, 66
             self.setGeometry(sg.center().x() - tw // 2, sg.top() + 30, tw, th)
 
         self.setObjectName("ToolBarWindow")
@@ -346,7 +347,7 @@ class ToolBarWindow(QWidget):
             row.addWidget(btn)
 
             # Inline color swatch + width label for pen & highlighter tools only
-            if tool not in (ToolType.ERASER, ToolType.MOUSE):
+            if tool not in (ToolType.ERASER, ToolType.MOUSE, ToolType.SELECT):
                 color, width_val = self._tool_settings.get(tool, (QColor(0, 0, 0), 3.0))
 
                 swatch = QPushButton()
