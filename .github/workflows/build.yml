@@ -3,7 +3,7 @@ name: Build & Release
 on:
   push:
     tags:
-      - "v*"  # 推送 v0.1.0, v1.0.0 等 tag 时触发
+      - "v*"
 
 permissions:
   contents: write
@@ -34,10 +34,14 @@ jobs:
           name: screen-doodle-windows
           path: dist/screen-doodle/
 
+      - name: Package as zip
+        run: |
+          cd dist
+          powershell Compress-Archive -Path screen-doodle -DestinationPath screen-doodle-windows.zip
+
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
           name: ${{ github.ref_name }}
           generate_release_notes: true
-          files: |
-            dist/screen-doodle/**/*
+          files: dist/screen-doodle-windows.zip
