@@ -35,7 +35,7 @@
 
 ```bash
 # 克隆仓库
-git clone https://github.com/your-username/screen-doodle.git
+git clone https://github.com/lilightspeed/screen-doodle.git
 cd screen-doodle
 
 # 安装依赖
