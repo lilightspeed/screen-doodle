@@ -46,7 +46,7 @@ def _conda_dll_args() -> list[str]:
     dll_name = f"python{sys.version_info.major}{sys.version_info.minor}.dll"
     conda_dll = os.path.join(os.path.dirname(sys.executable), dll_name)
     if os.path.exists(conda_dll):
-        print(f"  📦 检测到 conda Python DLL: {conda_dll}")
+        print(f"  [conda] 检测到 conda Python DLL: {conda_dll}")
         return [
             # Add the env root so PyInstaller can find the DLL when resolving deps
             "--paths", os.path.dirname(sys.executable),
@@ -87,7 +87,7 @@ def build_onedir():
     _trim_unused_qt(out_dir / "_internal" / "PySide6")
     _copy_setting_json(out_dir)
     _print_size(out_dir)
-    print(f"✅ 打包完成！输出目录: {out_dir}")
+    print(f"[完成] 打包完成！输出目录: {out_dir}")
 
 
 def build_onefile():
@@ -115,9 +115,9 @@ def build_onefile():
     )
     exe = DIST_DIR / "screen-doodle.exe"
     if exe.exists():
-        print(f"✅ 打包完成！单 exe: {exe}")
+        print(f"[完成] 打包完成！单 exe: {exe}")
     else:
-        print(f"⚠️  预期输出 {exe} 未找到，请检查 dist/ 目录")
+        print(f"[警告] 预期输出 {exe} 未找到，请检查 dist/ 目录")
 
 
 def _run_pyinstaller(args: list[str]) -> None:
@@ -157,7 +157,7 @@ def _trim_unused_qt(qt_dir: Path) -> None:
                 sz = f.stat().st_size
                 f.unlink()
                 removed_size += sz
-                print(f"  🗑  删除: {f.name} (节省 {sz / 1024 / 1024:.0f} MB)")
+                print(f"  [删除] {f.name} (节省 {sz / 1024 / 1024:.0f} MB)")
 
     # Remove unused plugin directories
     plugins_dir = qt_dir / "plugins"
@@ -171,7 +171,7 @@ def _trim_unused_qt(qt_dir: Path) -> None:
                 sz = sum(f.stat().st_size for f in plugin_sub.rglob("*") if f.is_file())
                 shutil.rmtree(plugin_sub)
                 removed_size += sz
-                print(f"  🗑  删除插件: {name}/ (节省 {sz / 1024 / 1024:.0f} MB)")
+                print(f"  [删除插件] {name}/ (节省 {sz / 1024 / 1024:.0f} MB)")
 
     # Remove QML directory (not needed)
     qml_dir = qt_dir / "qml"
@@ -179,7 +179,7 @@ def _trim_unused_qt(qt_dir: Path) -> None:
         sz = sum(f.stat().st_size for f in qml_dir.rglob("*") if f.is_file())
         shutil.rmtree(qml_dir)
         removed_size += sz
-        print(f"  🗑  删除 QML 引擎 (节省 {sz / 1024 / 1024:.0f} MB)")
+        print(f"  [删除 QML] (节省 {sz / 1024 / 1024:.0f} MB)")
 
     # Remove multimedia DLLs (avcodec, avformat, etc.)
     for f in qt_dir.iterdir():
@@ -189,7 +189,7 @@ def _trim_unused_qt(qt_dir: Path) -> None:
                 sz = f.stat().st_size
                 f.unlink()
                 removed_size += sz
-                print(f"  🗑  删除多媒体: {f.name} (节省 {sz / 1024 / 1024:.0f} MB)")
+                print(f"  [删除多媒体] {f.name} (节省 {sz / 1024 / 1024:.0f} MB)")
 
     print(f"  共节省: {removed_size / 1024 / 1024:.0f} MB")
 
@@ -197,7 +197,7 @@ def _trim_unused_qt(qt_dir: Path) -> None:
 def _print_size(path: Path) -> None:
     """Print human-readable total size of a directory."""
     total = sum(f.stat().st_size for f in path.rglob("*") if f.is_file())
-    print(f"  📦 最终体积: {total / 1024 / 1024:.0f} MB")
+    print(f"  [体积] 最终体积: {total / 1024 / 1024:.0f} MB")
 
 
 def _copy_setting_json(dist_root: Path) -> None:
@@ -266,7 +266,7 @@ def clean():
     for spec in PROJECT_ROOT.glob("*.spec"):
         spec.unlink()
         print(f"删除文件: {spec}")
-    print("✅ 清理完成")
+    print("[完成] 清理完成")
 
 
 if __name__ == "__main__":
