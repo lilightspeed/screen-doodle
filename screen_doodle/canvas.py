@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import math
+
 from PySide6.QtCore import Qt, QPointF, QSize, QRectF
 from PySide6.QtGui import (
     QColor,
@@ -58,9 +60,16 @@ class DrawingCanvas(QWidget):
         self._drag_start_pos: QPointF | None = None
 
         # Move undo/redo stacks
-        # Each entry: {'indices': {stroke_idx: {point_idx, ...}}, 'delta': QPointF}
+        # Each entry: {'indices': {stroke_idx, ...}, 'delta': QPointF}
         self._move_undo_stack: list[dict] = []
         self._move_redo_stack: list[dict] = []
+
+        # Split state: when a crossing stroke is split at the polygon boundary,
+        # the original stroke list is saved here so Ctrl+Z can restore it.
+        self._pre_split_strokes: list[Stroke] | None = None
+        # Number of strokes right after the split — used when restoring
+        # _pre_split_strokes to preserve any strokes drawn after the split.
+        self._post_split_count: int = 0
 
         # Rebuild cache when strokes change
         self.stroke_manager.data_changed.connect(self._invalidate_cache)
@@ -126,24 +135,60 @@ class DrawingCanvas(QWidget):
         self.releaseMouse()
 
     def undo(self) -> None:
+        # 1. Undo the last committed move
         if self._move_undo_stack:
             data = self._move_undo_stack.pop()
             self._move_redo_stack.append(data)
             self._apply_delta(data['indices'], -data['delta'])
-            self._clear_selection()
+            # Clear selection visual but keep _pre_split_strokes
+            self._selection_active = False
+            self._selection_polygon.clear()
+            self._selected_stroke_indices.clear()
+            self._selected_point_indices.clear()
+            self._lasso_points.clear()
+            self._is_dragging_selection = False
+            self._drag_start_pos = None
             self._invalidate_cache()
             self.update()
             return
+
+        # 2. Undo the split (restore pre-split stroke list)
+        if self._pre_split_strokes is not None:
+            current = self.stroke_manager.strokes
+            # Preserve any strokes the user added *after* the split was
+            # made — they are at indices >= _post_split_count.
+            extra: list[Stroke] = []
+            if self._post_split_count < len(current):
+                extra = current[self._post_split_count:]
+            current.clear()
+            current.extend(self._pre_split_strokes)
+            current.extend(extra)
+            self._pre_split_strokes = None
+            self._post_split_count = 0
+            self._clear_selection()
+            self.stroke_manager.data_changed.emit()
+            self._invalidate_cache()
+            self.update()
+            return
+
+        # 3. Normal stroke_manager undo
         self.stroke_manager.undo()
         self._reset_preview_state()
         self.update()
 
     def redo(self) -> None:
+        # 1. Redo the last committed move
         if self._move_redo_stack:
             data = self._move_redo_stack.pop()
             self._move_undo_stack.append(data)
             self._apply_delta(data['indices'], data['delta'])
-            self._clear_selection()
+            self._selection_active = False
+            self._selection_polygon.clear()
+            self._selected_stroke_indices.clear()
+            self._selected_point_indices.clear()
+            self._lasso_points.clear()
+            self._is_dragging_selection = False
+            self._drag_start_pos = None
             self._invalidate_cache()
             self.update()
             return
@@ -556,26 +601,56 @@ class DrawingCanvas(QWidget):
     # ------------------------------------------------------------------
 
     @staticmethod
+    def _point_on_polygon_boundary(
+        point: QPointF, polygon: list[QPointF], eps: float = 0.5,
+    ) -> bool:
+        """Return True if *point* is within *eps* of any polygon edge."""
+        n = len(polygon)
+        for i in range(n):
+            p1 = polygon[i]
+            p2 = polygon[(i + 1) % n]
+            dx = p2.x() - p1.x()
+            dy = p2.y() - p1.y()
+            seg_sq = dx * dx + dy * dy
+            if seg_sq < 1e-12:
+                continue
+            t = ((point.x() - p1.x()) * dx + (point.y() - p1.y()) * dy) / seg_sq
+            t = max(0.0, min(1.0, t))
+            cx = p1.x() + t * dx
+            cy = p1.y() + t * dy
+            if math.hypot(point.x() - cx, point.y() - cy) <= eps:
+                return True
+        return False
+
+    @staticmethod
     def _point_in_polygon(point: QPointF, polygon: list[QPointF]) -> bool:
-        """Ray casting algorithm: returns True if *point* is inside *polygon*."""
+        """Ray casting with boundary tolerance for robust classification."""
+        # Treat points on or very near the boundary as inside
+        if DrawingCanvas._point_on_polygon_boundary(point, polygon, eps=0.5):
+            return True
         inside = False
         j = len(polygon) - 1
         for i in range(len(polygon)):
-            if (
-                (polygon[i].y() > point.y()) != (polygon[j].y() > point.y())
-            ) and (
-                point.x()
-                < (polygon[j].x() - polygon[i].x())
-                * (point.y() - polygon[i].y())
-                / (polygon[j].y() - polygon[i].y())
-                + polygon[i].x()
-            ):
-                inside = not inside
+            yi, yj = polygon[i].y(), polygon[j].y()
+            if (yi > point.y()) != (yj > point.y()):
+                x_intersect = (
+                    (polygon[j].x() - polygon[i].x())
+                    * (point.y() - yi)
+                    / (yj - yi)
+                    + polygon[i].x()
+                )
+                if point.x() < x_intersect:
+                    inside = not inside
             j = i
         return inside
 
     def _close_lasso(self) -> None:
-        """Close the lasso into a polygon and find enclosed strokes."""
+        """Close the lasso into a polygon and find enclosed strokes.
+
+        Strokes that cross the polygon boundary are **split** at the
+        boundary so that only the portion inside the polygon can be
+        moved without carrying the outside portion along.
+        """
         if len(self._lasso_points) < 3:
             self._lasso_points.clear()
             return
@@ -583,31 +658,99 @@ class DrawingCanvas(QWidget):
         self._selection_polygon = list(self._lasso_points)
         self._lasso_points.clear()
 
-        # Find strokes with any point inside the polygon, AND record
-        # exactly which points are inside (for partial-stroke moves).
-        strokes = self.stroke_manager.strokes
-        self._selected_stroke_indices.clear()
-        self._selected_point_indices.clear()
-        for idx, stroke in enumerate(strokes):
-            inside: set[int] = set()
-            for i, pt in enumerate(stroke.points):
-                if self._point_in_polygon(pt, self._selection_polygon):
-                    inside.add(i)
-            if inside:
-                self._selected_stroke_indices.add(idx)
-                self._selected_point_indices[idx] = inside
+        original_strokes = self.stroke_manager.strokes
 
-        if not self._selected_stroke_indices:
+        # Save pre-split state for undo
+        self._pre_split_strokes = list(original_strokes)
+
+        new_strokes: list[Stroke] = []
+        selected_indices: set[int] = set()
+        split_happened = False
+
+        for stroke in original_strokes:
+            pts = stroke.points
+            if not pts:
+                new_strokes.append(stroke)
+                continue
+
+            # Quick inside/outside/crossing classification
+            has_inside = False
+            has_outside = False
+            for pt in pts:
+                if self._point_in_polygon(pt, self._selection_polygon):
+                    has_inside = True
+                else:
+                    has_outside = True
+                if has_inside and has_outside:
+                    break
+
+            if not has_inside:
+                # Fully outside — keep as-is, not selected
+                new_strokes.append(stroke)
+                continue
+
+            if not has_outside:
+                # Fully inside — keep, mark as selected
+                new_strokes.append(stroke)
+                selected_indices.add(len(new_strokes) - 1)
+                continue
+
+            # Crossing the boundary — split at polygon edges
+            inside_parts, outside_parts = self._split_stroke_at_polygon(
+                stroke, self._selection_polygon,
+            )
+            split_happened = True
+
+            # Outside portion(s) replace the original position
+            for op in outside_parts:
+                new_strokes.append(op)
+
+            # Inside portions are appended after outside ones, marked selected
+            for ipart in inside_parts:
+                new_strokes.append(ipart)
+                selected_indices.add(len(new_strokes) - 1)
+
+        if split_happened:
+            # Split restructured the stroke list, making any previous
+            # move-undo entries' stroke indices invalid — clear them.
+            self._move_undo_stack.clear()
+            self._move_redo_stack.clear()
+        elif self._pre_split_strokes is not None:
+            # No split was actually needed — discard saved state
+            self._pre_split_strokes = None
+
+        # Update stroke_manager's list
+        original_strokes.clear()
+        original_strokes.extend(new_strokes)
+
+        # Track how many strokes the list has right after the split so that
+        # undo can restore _pre_split_strokes without losing strokes drawn
+        # later.
+        self._post_split_count = len(new_strokes)
+
+        # Populate selection state
+        self._selected_stroke_indices = selected_indices
+        self._selected_point_indices.clear()
+        for idx in selected_indices:
+            if idx < len(new_strokes):
+                self._selected_point_indices[idx] = set(
+                    range(len(new_strokes[idx].points))
+                )
+
+        if not selected_indices:
             self._selection_active = False
             self._selection_polygon.clear()
+            self._pre_split_strokes = None
+            self._post_split_count = 0
             self.update()
             return
 
         self._selection_active = True
+        self.stroke_manager.data_changed.emit()
         self.update()
 
     def _clear_selection(self) -> None:
-        """Clear the current selection and drag state."""
+        """Clear the current selection, drag state, and split undo data."""
         self._selection_active = False
         self._selection_polygon.clear()
         self._selected_stroke_indices.clear()
@@ -615,7 +758,226 @@ class DrawingCanvas(QWidget):
         self._lasso_points.clear()
         self._is_dragging_selection = False
         self._drag_start_pos = None
+        self._pre_split_strokes = None
+        self._post_split_count = 0
         self.update()
+
+    # ------------------------------------------------------------------
+    # Line-polygon intersection & stroke splitting
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _segment_intersection(
+        p1: QPointF, p2: QPointF,
+        q1: QPointF, q2: QPointF,
+    ) -> tuple[float, QPointF] | None:
+        """Find the intersection of line segments p1-p2 and q1-q2.
+
+        Returns ``(t, point)`` where *t* in [0, 1] is the parametric
+        position along p1-p2, or ``None`` if the segments are parallel
+        or do not intersect (excluding shared endpoints on the q segment
+        to avoid double-counting at polygon vertices).
+        """
+        dx1 = p2.x() - p1.x()
+        dy1 = p2.y() - p1.y()
+        dx2 = q2.x() - q1.x()
+        dy2 = q2.y() - q1.y()
+
+        det = dx1 * dy2 - dy1 * dx2
+        if abs(det) < 1e-12:
+            return None
+
+        t = ((q1.x() - p1.x()) * dy2 - (q1.y() - p1.y()) * dx2) / det
+        u = ((q1.x() - p1.x()) * dy1 - (q1.y() - p1.y()) * dx1) / det
+
+        EPS = 1e-9
+        # Allow the intersection to be at the p-segment endpoints (t in [0,1])
+        # but require it to be strictly BETWEEN q-segment endpoints so that
+        # polygon vertices are not double-counted by adjacent edges.
+        if t >= -EPS and t <= 1.0 + EPS and u > EPS and u < 1.0 - EPS:
+            tc = max(0.0, min(1.0, t))
+            return (tc, QPointF(p1.x() + tc * dx1, p1.y() + tc * dy1))
+        return None
+
+    def _stroke_segment_intersection(
+        self,
+        p1: QPointF,
+        p2: QPointF,
+        polygon: list[QPointF],
+    ) -> tuple[float, QPointF] | None:
+        """Find the FIRST intersection of segment p1-p2 with *polygon*.
+
+        Returns ``(t, point)`` along p1-p2, or ``None``.
+        """
+        best_t = 1.0
+        best_pt: QPointF | None = None
+        n = len(polygon)
+        for i in range(n):
+            q1 = polygon[i]
+            q2 = polygon[(i + 1) % n]
+            result = self._segment_intersection(p1, p2, q1, q2)
+            if result is not None and result[0] < best_t:
+                best_t = result[0]
+                best_pt = result[1]
+
+        if best_pt is not None:
+            return (best_t, best_pt)
+        return None
+
+    def _split_stroke_at_polygon(
+        self,
+        stroke: Stroke,
+        polygon: list[QPointF],
+    ) -> tuple[list[Stroke], list[Stroke]]:
+        """Split *stroke* at the *polygon* boundary.
+
+        Returns ``(inside_strokes, outside_strokes)`` where each is a
+        (possibly empty) list of strokes.  Multiple boundary crossings
+        produce multiple inside / outside pieces.
+        """
+        pts = stroke.points
+        n = len(pts)
+        if n < 2:
+            if n == 1 and self._point_in_polygon(pts[0], polygon):
+                return ([stroke], [])
+            return ([], [stroke])
+
+        has_widths = (
+            stroke.point_widths is not None
+            and len(stroke.point_widths) == n
+        )
+        wids = stroke.point_widths if has_widths else []
+
+        # Classify each point
+        inside = [self._point_in_polygon(pt, polygon) for pt in pts]
+
+        all_in = all(inside)
+        all_out = not any(inside)
+        if all_in:
+            return ([stroke], [])
+        if all_out:
+            return ([], [stroke])
+
+        # Build separate inside/outside sequences for each crossing.
+        # Use list-of-lists so multiple boundary crossings each get their
+        # own sequence (fixes the "thin thread" / missing-ip bug).
+        in_seq_pts: list[list[QPointF]] = []
+        in_seq_wids: list[list[float]] = [] if has_widths else None  # type: ignore
+        out_seq_pts: list[list[QPointF]] = [[]]
+        out_seq_wids: list[list[float]] = [[]] if has_widths else None  # type: ignore
+
+        for i in range(n - 1):
+            p1, p2 = pts[i], pts[i + 1]
+            in1, in2 = inside[i], inside[i + 1]
+            w1 = wids[i] if has_widths else stroke.width
+            w2 = wids[i + 1] if has_widths else stroke.width
+
+            if in1 and in2:
+                # Both inside — extend the last inside sequence
+                if not in_seq_pts:
+                    # Started inside (first point was inside) — create seq
+                    in_seq_pts.append([p1])
+                    if has_widths:
+                        in_seq_wids.append([w1])
+                in_seq_pts[-1].append(p2)
+                if has_widths:
+                    in_seq_wids[-1].append(w2)
+
+            elif not in1 and not in2:
+                # Both outside — extend the last outside sequence
+                out_pts = out_seq_pts[-1]
+                if not out_pts:
+                    out_pts.append(p1)
+                    if has_widths:
+                        out_seq_wids[-1].append(w1)
+                out_pts.append(p2)
+                if has_widths:
+                    out_seq_wids[-1].append(w2)
+
+            elif in1 and not in2:
+                # Exiting the polygon
+                interp = self._stroke_segment_intersection(p1, p2, polygon)
+                if interp is not None:
+                    t, ip = interp
+                    iw = (w1 + t * (w2 - w1)) if has_widths else stroke.width
+                    # End the current inside sequence at the boundary
+                    if in_seq_pts:
+                        in_seq_pts[-1].append(ip)
+                        if has_widths:
+                            in_seq_wids[-1].append(iw)
+                    # Start a new outside sequence from the boundary
+                    out_seq_pts.append([QPointF(ip), QPointF(p2)])
+                    if has_widths:
+                        out_seq_wids.append([iw, w2])
+                else:
+                    mp = QPointF(
+                        (p1.x() + p2.x()) * 0.5, (p1.y() + p2.y()) * 0.5,
+                    )
+                    mw = (w1 + w2) * 0.5 if has_widths else stroke.width
+                    if in_seq_pts:
+                        in_seq_pts[-1].append(mp)
+                        if has_widths:
+                            in_seq_wids[-1].append(mw)
+                    out_seq_pts.append([QPointF(mp), QPointF(p2)])
+                    if has_widths:
+                        out_seq_wids.append([mw, w2])
+
+            else:  # not in1 and in2 — entering the polygon
+                interp = self._stroke_segment_intersection(p1, p2, polygon)
+                if interp is not None:
+                    t, ip = interp
+                    iw = (w1 + t * (w2 - w1)) if has_widths else stroke.width
+                    # End the current outside sequence at the boundary
+                    out_seq_pts[-1].append(ip)
+                    if has_widths:
+                        out_seq_wids[-1].append(iw)
+                    # Start a new inside sequence from the boundary
+                    in_seq_pts.append([QPointF(ip), QPointF(p2)])
+                    if has_widths:
+                        in_seq_wids.append([iw, w2])
+                else:
+                    mp = QPointF(
+                        (p1.x() + p2.x()) * 0.5, (p1.y() + p2.y()) * 0.5,
+                    )
+                    mw = (w1 + w2) * 0.5 if has_widths else stroke.width
+                    out_seq_pts[-1].append(mp)
+                    if has_widths:
+                        out_seq_wids[-1].append(mw)
+                    in_seq_pts.append([QPointF(mp), QPointF(p2)])
+                    if has_widths:
+                        in_seq_wids.append([mw, w2])
+
+        # Build strokes from inside sequences
+        inside_strokes: list[Stroke] = []
+        for j, in_pts in enumerate(in_seq_pts):
+            if len(in_pts) >= 2:
+                inside_strokes.append(Stroke(
+                    points=in_pts,
+                    color=stroke.color,
+                    width=stroke.width,
+                    opacity=stroke.opacity,
+                    tool=stroke.tool,
+                    point_widths=(
+                        in_seq_wids[j] if has_widths else None
+                    ),
+                ))
+
+        # Build strokes from outside sequences
+        outside_strokes: list[Stroke] = []
+        for j, out_pts in enumerate(out_seq_pts):
+            if len(out_pts) >= 2:
+                outside_strokes.append(Stroke(
+                    points=out_pts,
+                    color=stroke.color,
+                    width=stroke.width,
+                    opacity=stroke.opacity,
+                    tool=stroke.tool,
+                    point_widths=(
+                        out_seq_wids[j] if has_widths else None
+                    ),
+                ))
+
+        return (inside_strokes, outside_strokes)
 
     # ------------------------------------------------------------------
     # Point-based selection move
