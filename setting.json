@@ -1,5 +1,5 @@
 {
-  "_comment": "Stroke tuning profile.\nEdit any value and restart the app to apply.\nDelete this file to regenerate defaults.",
+  "_comment": "Stroke tuning settings.\nEdit any value and restart the app to apply.\nDelete this file to regenerate defaults.",
   "velocity": {
     "sample_interval": 4,
     "smoothing_alpha": 0.35,

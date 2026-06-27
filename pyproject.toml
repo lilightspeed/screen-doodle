@@ -6,7 +6,19 @@ build-backend = "setuptools.build_meta"
 name = "screen-doodle"
 version = "0.1.0"
 description = "Lightweight Windows screen annotation tool"
+readme = "README.md"
 requires-python = ">=3.12"
+license = {text = "MIT"}
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Win32 (MS Windows)",
+    "Operating System :: Microsoft :: Windows",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Multimedia :: Graphics :: Capture :: Screen Capture",
+    "Intended Audience :: End Users/Desktop",
+]
 dependencies = [
     "PySide6>=6.6.0",
     "Pillow>=10.0.0",

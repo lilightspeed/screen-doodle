@@ -37,6 +37,7 @@ ScreenDoodle/
 ├── requirements.txt             # 依赖清单
 ├── pyproject.toml               # 项目元数据
 ├── run.bat                      # Windows 启动脚本
+├── setting.json                 # 笔迹调优参数（删除后自动重建）
 ├── screen_doodle/
 │   ├── __init__.py
 │   ├── app.py                   # QApplication 单例 + 全局热键 + 窗口协调 + 托盘
@@ -48,7 +49,7 @@ ScreenDoodle/
 │   └── renderer.py              # 笔迹渲染函数（与画布解耦）
 ├── resources/
 │   └── icons/                   # （预留）工具栏图标
-└── docs/                        # （预留）文档
+└── docs/                        # 文档
 ```
 
 ### 各模块职责
@@ -220,9 +221,9 @@ keyboard>=0.13      # 全局热键
 - [x] 设置自动保存（每次变更即时写盘）
 - [x] 工具栏位置持久化
 
-## 笔迹调节配置 (`stroke_profile.json`)
+## 笔迹调节配置 (`setting.json`)
 
-项目根目录的 `stroke_profile.json` 用于调节笔迹渲染参数。修改后重启应用即可生效；删除此文件可重新生成默认值。
+项目根目录的 `setting.json` 用于调节笔迹渲染参数。修改后重启应用即可生效；删除此文件可重新生成默认值。
 
 ```json
 {
@@ -232,17 +233,19 @@ keyboard>=0.13      # 全局热键
     "smoothing_alpha": 0.35,
     "thin_mult": 0.4,
     "thick_mult": 2.5,
-    "ref_dist": 10.0,
-    "power_exponent": 0.7
+    "ref_dist": 15.0,
+    "power_exponent": 1.5
   },
   "rendering": {
-    "min_segment_width": 0.5,
-    "preview_opacity": 1.0,
-    "highlighter_opacity_scale": 0.3,
+    "min_segment_width": 0.1,
+    "aa_quality": 2,
+    "preview_antialias": true,
+    "preview_opacity": 1,
+    "highlighter_opacity_scale": 0.23,
     "highlighter_width_scale": 4.0,
-    "interpolation_segments": 3,
-    "subdivision_pixel_gap": 8.0,
-    "max_point_gap": 8.0,
+    "interpolation_segments": 2,
+    "subdivision_pixel_gap": 4.0,
+    "max_point_gap": 3.0,
     "max_densify_insert": 16
   }
 }
@@ -256,20 +259,22 @@ keyboard>=0.13      # 全局热键
 | `smoothing_alpha` | `0.35` | 指数平滑因子（越小过渡越平滑，越大笔锋越灵敏） |
 | `thin_mult` | `0.4` | 最快速度时的最小宽度倍率 |
 | `thick_mult` | `2.5` | 最慢速度时的最大宽度倍率 |
-| `ref_dist` | `10.0` | 速度曲线半程参考距离（像素） |
-| `power_exponent` | `0.7` | 速度-宽度曲线形状（<1 低速段更敏感） |
+| `ref_dist` | `15.0` | 速度曲线半程参考距离（像素） |
+| `power_exponent` | `1.5` | 速度-宽度曲线形状（<1 低速段更敏感，>1 高速段更敏感） |
 
 ### rendering 渲染质量
 
 | 字段 | 默认值 | 说明 |
 |------|--------|------|
-| `min_segment_width` | `0.5` | 每小段最小绘制宽度（防止零宽度导致不可见） |
+| `min_segment_width` | `0.1` | 每小段最小绘制宽度（防止零宽度导致不可见） |
+| `aa_quality` | `2` | SSAA 超采样倍数（1=Qt自带AA，2=2×SSAA 高质量） |
+| `preview_antialias` | `true` | 笔迹预览是否启用抗锯齿 |
 | `preview_opacity` | `1.0` | 笔迹预览透明度倍率 |
-| `highlighter_opacity_scale` | `0.3` | 荧光笔额外透明度倍率 |
+| `highlighter_opacity_scale` | `0.23` | 荧光笔额外透明度倍率 |
 | `highlighter_width_scale` | `4.0` | 荧光笔宽度倍率（在基础宽度上放大） |
-| `interpolation_segments` | `3` | Catmull-Rom 每对控制点之间的插值段数（越高曲线越平滑） |
-| `subdivision_pixel_gap` | `8.0` | **回退细分密度**：渲染器在极端稀疏时的安全细分间距（正常情况下由 stroke_manager 插密接管） |
-| `max_point_gap` | `8.0` | **自适应插密阈值**：相邻原始采样点超过此距离时，自动用 Catmull-Rom 插入带曲率的中间点（越小插密越密，曲线越平滑；调大则保留更多原始稀疏采样） |
+| `interpolation_segments` | `2` | Catmull-Rom 每对控制点之间的插值段数（越高曲线越平滑） |
+| `subdivision_pixel_gap` | `4.0` | **回退细分密度**：渲染器在极端稀疏时的安全细分间距（正常情况下由 stroke_manager 插密接管） |
+| `max_point_gap` | `3.0` | **自适应插密阈值**：相邻原始采样点超过此距离时，自动用 Catmull-Rom 插入带曲率的中间点（越小插密越密，曲线越平滑；调大则保留更多原始稀疏采样） |
 | `max_densify_insert` | `16` | 单次插密最多插入的点数，防止极端稀疏数据导致点数爆炸 |
 
 ## 待实现功能（Phase 3 & 4）

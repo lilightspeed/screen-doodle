@@ -23,7 +23,7 @@ class StrokeConfig:
     sample_interval: int = 4
     """Recalculate width every N mouse events (lower frequency = smoother)."""
 
-    smoothing_alpha: float = 0.12
+    smoothing_alpha: float = 0.35
     """Exponential smoothing factor (lower = smoother/slower response)."""
 
     thin_mult: float = 0.4
@@ -32,14 +32,14 @@ class StrokeConfig:
     thick_mult: float = 2.5
     """Width multiplier at min speed (slowest = thick)."""
 
-    ref_dist: float = 20.0
+    ref_dist: float = 15.0
     """Pixel distance at which the velocity curve is roughly halfway."""
 
-    power_exponent: float = 0.7
+    power_exponent: float = 1.5
     """Shape of the velocity→width curve (<1 = more sensitivity at low speeds)."""
 
     # ── Rendering quality ────────────────────────────────────────────────
-    min_segment_width: float = 0.5
+    min_segment_width: float = 0.1
     """Clamp per-segment width to at least this value (avoids zero-width artifacts)."""
 
     aa_quality: int = 2
@@ -47,21 +47,20 @@ class StrokeConfig:
     2 = 2× SSAA (4× pixels, high quality),  3 = 3× (9× pixels).
     Higher values use proportionally more memory."""
 
-    preview_antialias: bool = False
+    preview_antialias: bool = True
     """Whether to enable antialiasing on the in-progress preview.
-    When False (default), the preview shows visible stair‑step edges,
-    making the smooth final render clearly distinguishable on release."""
+    When True (default), the preview shows smooth edges matching the final render."""
 
-    preview_opacity: float = 0.7
+    preview_opacity: float = 1.0
     """Opacity multiplier for the in-progress stroke preview."""
 
-    highlighter_opacity_scale: float = 0.3
+    highlighter_opacity_scale: float = 0.23
     """Additional opacity multiplier for the highlighter tool."""
 
     highlighter_width_scale: float = 4.0
     """Width multiplier for the highlighter tool (applied on top of base width)."""
 
-    interpolation_segments: int = 8
+    interpolation_segments: int = 2
     """Catmull-Rom sub‑segments per control‑point pair (higher = smoother curve)."""
 
     subdivision_pixel_gap: float = 4.0
@@ -70,7 +69,7 @@ class StrokeConfig:
     Only used during the transient phase before enough mouse events arrive for
     Catmull-Rom interpolation."""
 
-    max_point_gap: float = 8.0
+    max_point_gap: float = 3.0
     """Max pixel distance between consecutive raw input points before automatic
     densification inserts Catmull-Rom interpolated intermediate points.
     Smaller values = denser point cloud = smoother curves (slightly more CPU)."""
@@ -84,11 +83,11 @@ class StrokeConfig:
 # JSON file management
 # ---------------------------------------------------------------------------
 
-_CONFIG_FILE = "stroke_profile.json"
+_CONFIG_FILE = "setting.json"
 
 
 def _resolve_config_path() -> str:
-    """Return ``<project-root>/stroke_profile.json``."""
+    """Return ``<project-root>/setting.json``."""
     return os.path.join(
         os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
         _CONFIG_FILE,
@@ -100,7 +99,7 @@ def _write_defaults(path: str) -> None:
     cfg = StrokeConfig()
     data = {
         "_comment": (
-            "Stroke tuning profile.\n"
+            "Stroke tuning settings.\n"
             "Edit any value and restart the app to apply.\n"
             "Delete this file to regenerate defaults."
         ),
