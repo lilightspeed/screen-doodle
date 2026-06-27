@@ -35,6 +35,27 @@ COMPANY_NAME = "Screen Doodle"
 FILE_DESCRIPTION = "Screen Doodle — 屏幕涂鸦工具"
 
 
+def _conda_dll_args() -> list[str]:
+    """Return extra PyInstaller args to bundle Python DLL from conda envs.
+
+    Conda places ``python3XY.dll`` in the environment root (not in ``DLLs/``
+    or ``Library/bin/`` like a standard Python install).  PyInstaller 6.x
+    sometimes misses it in this layout, causing a *Failed to load Python DLL*
+    error at startup.
+    """
+    dll_name = f"python{sys.version_info.major}{sys.version_info.minor}.dll"
+    conda_dll = os.path.join(os.path.dirname(sys.executable), dll_name)
+    if os.path.exists(conda_dll):
+        print(f"  📦 检测到 conda Python DLL: {conda_dll}")
+        return [
+            # Add the env root so PyInstaller can find the DLL when resolving deps
+            "--paths", os.path.dirname(sys.executable),
+            # Also explicitly bundle it into _internal/
+            "--add-binary", f"{conda_dll}{os.pathsep}.",
+        ]
+    return []
+
+
 def build_onedir():
     """Build in onedir mode (folder with all dependencies, faster startup)."""
     print("=== Building: onedir mode ===")
@@ -56,6 +77,8 @@ def build_onedir():
             # ── PySide6: only collect binaries (DLLs + Qt plugins),
             #     NOT all submodules (avoids bundling 600+ MB of unused Qt). ──
             "--collect-binaries", "PySide6",
+            # ── Conda env DLL fix ──
+            *_conda_dll_args(),
             # ── Entry point ──
             str(MAIN_SCRIPT),
         ]
@@ -85,6 +108,8 @@ def build_onefile():
             "--hidden-import", "PIL",
             "--hidden-import", "PIL._imaging",
             "--collect-binaries", "PySide6",
+            # ── Conda env DLL fix ──
+            *_conda_dll_args(),
             str(MAIN_SCRIPT),
         ]
     )
