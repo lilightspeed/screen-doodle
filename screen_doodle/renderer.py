@@ -330,6 +330,7 @@ def _draw_freehand(painter: QPainter, stroke: Stroke, is_preview: bool) -> None:
     painter.drawPath(path)
 
 
+
 def _draw_variable_width(
     painter: QPainter,
     stroke: Stroke,
@@ -408,14 +409,18 @@ def _draw_variable_width(
     smooth_w = interp_widths(widths, seg)
     m = len(smooth_pts)
 
+    # ── Per-segment drawLine ──────────────────────────────────────────
+    # Catmull‑Rom 12 gives ~0.25 px per segment, so RoundCap overlaps
+    # are seamless and width‑transition bumps invisible at any width.
+    # The preview (∼3 px segments, no AA) looks visibly coarser — the
+    # user sees a clear quality jump on release.
     painter.setRenderHint(QPainter.RenderHint.Antialiasing)
     painter.setBrush(Qt.NoBrush)
-
     for i in range(m - 1):
-        seg_w = (smooth_w[i] + smooth_w[i + 1]) / 2.0
-        if seg_w < cfg.min_segment_width:
-            seg_w = cfg.min_segment_width
-        pen = QPen(color, seg_w, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin)
+        seg_w = max((smooth_w[i] + smooth_w[i + 1]) / 2.0,
+                    cfg.min_segment_width)
+        pen = QPen(color, seg_w, Qt.SolidLine,
+                   Qt.RoundCap, Qt.RoundJoin)
         painter.setPen(pen)
         painter.drawLine(smooth_pts[i], smooth_pts[i + 1])
 

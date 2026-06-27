@@ -42,6 +42,11 @@ class StrokeConfig:
     min_segment_width: float = 0.5
     """Clamp per-segment width to at least this value (avoids zero-width artifacts)."""
 
+    preview_antialias: bool = False
+    """Whether to enable antialiasing on the in-progress preview.
+    When False (default), the preview shows visible stair‑step edges,
+    making the smooth final render clearly distinguishable on release."""
+
     preview_opacity: float = 0.7
     """Opacity multiplier for the in-progress stroke preview."""
 
@@ -104,6 +109,7 @@ def _write_defaults(path: str) -> None:
         },
         "rendering": {
             "min_segment_width": cfg.min_segment_width,
+            "preview_antialias": cfg.preview_antialias,
             "preview_opacity": cfg.preview_opacity,
             "highlighter_opacity_scale": cfg.highlighter_opacity_scale,
             "highlighter_width_scale": cfg.highlighter_width_scale,
@@ -167,6 +173,10 @@ def load_stroke_config() -> StrokeConfig:
 
     # --- rendering section ---
     rnd = data.get("rendering", {})
+    try:
+        cfg.preview_antialias = bool(rnd.get("preview_antialias", cfg.preview_antialias))
+    except (TypeError, ValueError):
+        pass
     try:
         cfg.min_segment_width = float(rnd.get("min_segment_width", cfg.min_segment_width))
     except (TypeError, ValueError):

@@ -10,6 +10,7 @@
   },
   "rendering": {
     "min_segment_width": 0.5,
+    "preview_antialias": false,
     "preview_opacity": 0.7,
     "highlighter_opacity_scale": 0.3,
     "highlighter_width_scale": 4.0,

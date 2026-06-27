@@ -12,11 +12,7 @@ from PySide6.QtGui import (
 from PySide6.QtWidgets import QWidget
 
 from .models import Stroke, ToolType
-from .renderer import (
-    catmull_rom_points,
-    interp_widths,
-    render_stroke,
-)
+from .renderer import render_stroke
 from .rendering_config import cfg
 from .stroke_manager import StrokeManager
 
@@ -291,17 +287,9 @@ class DrawingCanvas(QWidget):
     def _update_preview_incremental(self) -> None:
         """Render only newly-added segments of the current stroke.
 
-        For velocity-sensitive tools (PEN/PEN₂/PEN₃) the new segment range
-        is smoothed with lightweight centripetal Catmull-Rom interpolation
-        (4 sub‑segments) so the preview shows a smooth curve — not raw
-        straight line segments between densified points.  This is much
-        cheaper than the full Catmull-Rom pass (``interpolation_segments``,
-        typically 12) applied at finalization because only the *new* points
-        are processed, not the entire stroke.
-
-        Uniform‑width tools (HIGHLIGHTER) and ERASER keep the fast
-        ``drawLine`` path since their segments are already dense enough or
-        use CompositionMode_Clear.
+        All tools use raw ``drawLine`` on densified points so the user can
+        visually distinguish the ≈3 px straight-segment preview from the
+        fully-smoothed final render (Catmull-Rom 12 segments, ≈0.25 px).
         """
         preview = self.stroke_manager.preview_stroke()
         if preview is None:
@@ -327,7 +315,11 @@ class DrawingCanvas(QWidget):
             self._preview_pix.fill(Qt.transparent)
 
         pp = QPainter(self._preview_pix)
-        pp.setRenderHint(QPainter.Antialiasing)
+        if cfg.preview_antialias:
+            pp.setRenderHint(QPainter.Antialiasing)
+        # Intentionally no Antialiasing here — the user sees stair‑step
+        # edges while drawing, and the antialiased final render (CR 12)
+        # produces a clear quality jump on release.
         pp.setBrush(Qt.NoBrush)
 
         if preview.tool == ToolType.ERASER:
@@ -353,26 +345,17 @@ class DrawingCanvas(QWidget):
             )
 
             if is_variable:
-                # Variable width: smooth the segment range with lightweight
-                # Catmull-Rom (4 sub‑segments) so the preview shows a clean
-                # curve — not straight lines between densified points.
-                range_pts = pts[start:n]
-                range_w = wids[start:n]
-                _CR_PREVIEW_SEG = 4
-                if len(range_pts) >= 3:
-                    smooth_pts = catmull_rom_points(range_pts, _CR_PREVIEW_SEG)
-                    smooth_w = interp_widths(range_w, _CR_PREVIEW_SEG)
-                else:
-                    smooth_pts = range_pts
-                    smooth_w = range_w
-                m = len(smooth_pts)
-                for i in range(m - 1):
-                    seg_w = max((smooth_w[i] + smooth_w[i + 1]) / 2.0,
+                # No Catmull-Rom smoothing during preview — raw densified
+                # points are drawn directly so the user can visually tell
+                # preview (≈3px segments) from the fully-smoothed final
+                # render (CR 12 segments, ≈0.25px).
+                for i in range(start, n - 1):
+                    seg_w = max((wids[i] + wids[i + 1]) / 2.0,
                                 cfg.min_segment_width)
                     pen = QPen(color, seg_w, Qt.SolidLine,
                                Qt.RoundCap, Qt.RoundJoin)
                     pp.setPen(pen)
-                    pp.drawLine(smooth_pts[i], smooth_pts[i + 1])
+                    pp.drawLine(pts[i], pts[i + 1])
             else:
                 # Uniform width: single pen for all new segments
                 if preview.tool == ToolType.HIGHLIGHTER:
