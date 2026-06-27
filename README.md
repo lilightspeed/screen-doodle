@@ -82,7 +82,9 @@ Windows 下也可直接双击 `run.bat` 启动。
 
 ## 笔迹调优
 
-项目根目录的 `setting.json` 可用于调节笔迹渲染参数，包括速度感应宽度变化和渲染品质。详见 [笔迹配置说明](docs/stroke_config_guide.md)。
+项目根目录的 `setting.json` 可用于调节笔迹渲染参数，包括速度感应宽度变化和渲染品质。
+
+**详细参数说明请参考 → [`docs/stroke_config_guide.md`](docs/stroke_config_guide.md)**
 
 ```json
 {
