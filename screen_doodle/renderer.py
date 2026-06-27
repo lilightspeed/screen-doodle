@@ -171,7 +171,7 @@ def _add_smooth_path(path: QPainterPath, points: list[QPointF]) -> None:
         path.cubicTo(cp1, cp2, p2)
 
 
-def _catmull_rom_points(
+def catmull_rom_points(
     points: list[QPointF],
     segments: int,
 ) -> list[QPointF]:
@@ -245,8 +245,8 @@ def _catmull_rom_points(
     return out
 
 
-def _interp_widths(widths: list[float], segments: int) -> list[float]:
-    """Linearly interpolate widths to match ``_catmull_rom_points`` output.
+def interp_widths(widths: list[float], segments: int) -> list[float]:
+    """Linearly interpolate widths to match ``catmull_rom_points`` output.
 
     Each original width corresponds to one control point; the returned
     list has the same length as the point list from ``_catmull_rom_points``
@@ -404,8 +404,8 @@ def _draw_variable_width(
         return
 
     # Catmull-Rom interpolation for both position and width
-    smooth_pts = _catmull_rom_points(points, seg)
-    smooth_w = _interp_widths(widths, seg)
+    smooth_pts = catmull_rom_points(points, seg)
+    smooth_w = interp_widths(widths, seg)
     m = len(smooth_pts)
 
     painter.setRenderHint(QPainter.RenderHint.Antialiasing)
