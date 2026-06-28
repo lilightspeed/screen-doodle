@@ -30,7 +30,7 @@ DATA_FILES = [
 ]
 
 # -- Version info ----------------------------------------------------------
-VERSION = "0.1.0"
+VERSION = "0.2.0"
 COMPANY_NAME = "Screen Doodle"
 FILE_DESCRIPTION = "Screen Doodle - screen annotation tool"
 
