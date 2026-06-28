@@ -3,6 +3,9 @@ __pycache__/
 *.pyc
 .claude/
 
+# Project instructions (local-only, not checked into repo)
+CLAUDE.md
+
 # Build artifacts
 build/
 dist/
